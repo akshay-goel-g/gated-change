@@ -345,6 +345,14 @@ only (GitHub `FUNDING.yml` plus a README line), in its own commit, after the rep
 (the Sponsor button does not show on a private repo). Open: whether the directory policy or the
 chosen license say anything about monetization links (policy page not read).
 
+**Checked 2026-10-15 (Software Directory Policy, support.claude.com article 13145358):** section 4C excludes
+software that serves advertisements, sponsored content or paid product placements; 4A excludes software that
+transfers money or runs financial transactions for users; the section 4 preamble lets Anthropic permit
+exceptions in writing. The policy says **nothing explicit about donation or sponsor links** in a repo, listing
+or description, and the Directory Terms were not read. **Decision 2026-10-15 (owner): leave funding out** while it
+is unclear. If it is revisited: keep any link out of the plugin folder and the listing text, use only a
+repo-level `.github/FUNDING.yml`, and ask Anthropic first.
+
 ## M. Start here in the next session (written 2026-10-13; status updated 2026-10-15)
 
 **Status 2026-10-15: applied.** History is fresh (I-5, I-6) and pushed to the private repo `gated-change`; the license is
