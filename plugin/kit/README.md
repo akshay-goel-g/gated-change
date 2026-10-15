@@ -1199,6 +1199,7 @@ tools/                   status · reconcile · ledger · mine-registry · dashb
                          benchmark/
 examples/                walkthrough, surfaces.conf per project type, registry entries
 tests/run.sh             the kit's own suite — `bash tests/run.sh`. No dependencies
+tests/plugin-e2e.sh      installs the Claude Code plugin into scratch repos for every example project type — `bash tests/plugin-e2e.sh`, about two minutes
 experiments/             benchmark results land here
 ```
 
@@ -1265,7 +1266,8 @@ Named rather than implied:
   incident that proves it.
 - **Ran `tools/benchmark/` on your repo?** Post the result — good or bad.
 - **Changing the kit itself?** Run its own pipeline on the change (the kit dogfoods itself) and
-  `bash tests/run.sh` before opening a PR. New tools and gates need tests.
+  `bash tests/run.sh` before opening a PR. New tools and gates need tests. If you touched the
+  plugin, kit files or the examples, also run `bash tools/build-plugin.sh` and `bash tests/plugin-e2e.sh`.
 
 ---
 
