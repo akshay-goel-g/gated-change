@@ -61,6 +61,9 @@ for leaked in ledger.jsonl dashboard.html security-reports project tests experim
               LEARNINGS.md ACTION-PLAN.md dist; do
   if [ -e "$PLUGIN/kit/$leaked" ]; then bad "$leaked is inside plugin/kit/"; else ok; fi
 done
+if [ -n "$(find "$PLUGIN" -name .gitattributes -type f 2>/dev/null)" ]; then
+  bad "a .gitattributes is inside plugin/ (the directory's validation rejects it)"
+else ok; fi
 for f in LICENSE NOTICE README.md .claude-plugin/plugin.json; do
   [ -e "$PLUGIN/$f" ] && ok || bad "plugin/$f is missing"
 done

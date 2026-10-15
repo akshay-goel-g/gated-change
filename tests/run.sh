@@ -4475,6 +4475,8 @@ test_plugin_kit_copy_matches_the_sources_and_leaks_nothing() {
   for leaked in ledger.jsonl dashboard.html security-reports project tests experiments specs docs       plugin .claude-plugin .claude .github .git SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md       ACTION-PLAN.md dist; do
     [ -e "$KIT/plugin/kit/$leaked" ] && _fail "$leaked is inside plugin/kit/" || _ok
   done
+  [ -z "$(find "$KIT/plugin" -name .gitattributes -type f 2>/dev/null)" ] && _ok \
+    || _fail "a .gitattributes is inside plugin/ (the directory rejects it)"
   [ -f "$KIT/plugin/LICENSE" ] && [ -f "$KIT/plugin/NOTICE" ] && _ok     || _fail "the plugin root lacks LICENSE or NOTICE"
   [ -f "$KIT/plugin/kit/tools/status.sh" ] && [ -f "$KIT/plugin/kit/core/01-router.md" ] && _ok     || _fail "plugin/kit/ is missing the kit's tools or core"
   grep -q '"name": "gated-change"' "$KIT/plugin/.claude-plugin/plugin.json" && _ok     || _fail "plugin.json does not name the plugin gated-change"
@@ -7150,7 +7152,11 @@ test_mine_registry_default_output_lands_inside_the_kit() {
 # E5, revised in round 10: the ledger is NOT union-merged. Union made a verdict depend on merge
 # direction (R-008); a conflict is the signal that two branches logged the same change.
 test_gitattributes_does_not_union_merge_the_ledger() {
-  grep -q '^ledger\.jsonl[[:space:]].*merge=union' "$KIT/.gitattributes" && _fail ".gitattributes still union-merges ledger.jsonl" || _ok
+  local ga
+  for ga in "$KIT/.gitattributes" "$KIT"/*/.gitattributes; do
+    [ -f "$ga" ] || continue
+    grep -q '^ledger\.jsonl[[:space:]].*merge=union' "$ga" && _fail "$ga still union-merges ledger.jsonl" || _ok
+  done
   grep -q "merge=union" "$KIT/README.md" && grep -q "echo '.pipeline/ledger.jsonl merge=union'" "$KIT/README.md" && _fail "README still tells installs to union-merge the ledger" || _ok
 }
 

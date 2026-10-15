@@ -1,0 +1,13 @@
+# Line endings for this directory. These rules live here, not in the repository root, because the
+# Claude Code directory's validation rejects a root .gitattributes that rewrites files at checkout
+# and these files are not part of the plugin folder. tools/build-plugin.sh leaves this file out of
+# plugin/kit/. Without them a Windows checkout with core.autocrlf=true lands scripts as CRLF and
+# bash fails on them.
+*.sh text eol=lf
+pre-push text eol=lf
+matrix.lock text eol=lf
+*.md text eol=lf
+*.conf text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
