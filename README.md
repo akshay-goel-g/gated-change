@@ -1255,7 +1255,7 @@ A developer tool that is itself a gating or review product sits close to the lin
 you build it. The legal text decides, not this paragraph.
 
 **Asking about a use that is not covered**, or a commercial arrangement: open an issue on the
-repository, or contact the licensor through the profile linked from it.
+repository.
 
 **AI assistance.** Parts of the code, tests and documentation were written with the help of AI
 coding agents under the author's direction. The author claims copyright in the work as a whole
