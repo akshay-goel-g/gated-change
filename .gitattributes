@@ -23,3 +23,8 @@ VERSION text eol=lf
 # pass cleared this branch's FAIL (the kit's risk register, R-008). Without it two branches that both log
 # gates conflict, which makes a person look. Keep both sides' lines in the order they were logged,
 # then re-run `compliance` and re-log any gate whose pass came from the other branch.
+
+# The Claude Code plugin folder is a generated copy of the sources above. The directory's validation
+# rejects attributes that rewrite files at checkout inside a plugin, so none apply there (the rules
+# above would otherwise match plugin/kit/**). The install skill normalises line endings itself.
+/plugin/** !text !eol

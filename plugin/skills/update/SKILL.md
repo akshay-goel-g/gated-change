@@ -22,6 +22,13 @@ the preview lists any file the user may have changed. Only after they confirm:
 bash .pipeline/tools/update-kit.sh "${CLAUDE_PLUGIN_ROOT}/kit"
 ```
 
+Then strip carriage returns from the copied scripts, as the install skill does, so a plugin cached
+with Windows line endings does not break them:
+
+```bash
+find .pipeline -type f \( -name '*.sh' -o -name 'pre-push' -o -name '*.lock' \) | while read -r f; do tr -d '\r' < "$f" > "$f.lf" && cat "$f.lf" > "$f" && rm -f "$f.lf"; done
+```
+
 Then run `bash .pipeline/tools/status.sh` and report it. The `CHANGELOG.md` in the kit has an
 "Action required" section for each release: read it to the user, because a hook you installed earlier
 is a **copy** and may need re-installing. Re-installing overwrites `.git/hooks/pre-push`

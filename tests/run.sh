@@ -4469,7 +4469,7 @@ test_plugin_kit_copy_matches_the_sources_and_leaks_nothing() {
   local out; out="$(mktemp -d "$TMPROOT/plugin-build.XXXXXX")"
   cp -R "$KIT/plugin/.claude-plugin" "$out/" 2>/dev/null
   bash "$KIT/tools/build-plugin.sh" "$out" >/dev/null 2>&1 && _ok || _fail "build-plugin.sh failed"
-  if diff -r "$out/kit" "$KIT/plugin/kit" >/dev/null 2>&1; then _ok
+  if diff -r --strip-trailing-cr "$out/kit" "$KIT/plugin/kit" >/dev/null 2>&1; then _ok
   else _fail "plugin/kit/ is stale against the sources: run bash tools/build-plugin.sh"; fi
   local leaked
   for leaked in ledger.jsonl dashboard.html security-reports project tests experiments specs docs       plugin .claude-plugin .claude .github .git SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md       ACTION-PLAN.md dist; do

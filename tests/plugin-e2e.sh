@@ -54,7 +54,7 @@ echo "plugin-e2e — $PLUGIN"
 # ---------- 1. the built copy ---------------------------------------------------------------
 echo "1. the generated kit copy"
 if bash "$KIT/tools/build-plugin.sh" "$TMP/build" >/dev/null 2>&1; then ok; else bad "build-plugin.sh failed"; fi
-if diff -r "$TMP/build/kit" "$PLUGIN/kit" >/dev/null 2>&1; then ok
+if diff -r --strip-trailing-cr "$TMP/build/kit" "$PLUGIN/kit" >/dev/null 2>&1; then ok
 else bad "plugin/kit/ is stale: run  bash tools/build-plugin.sh"; fi
 for leaked in ledger.jsonl dashboard.html security-reports project tests experiments specs docs \
               plugin .claude-plugin .claude .github .git SESSION-HANDOFF.md INTENT-LOG.md \
@@ -162,6 +162,26 @@ for c in "${CASES[@]}"; do
   uout="$(timeout 120 bash .pipeline/tools/update-kit.sh "$PLUGIN/kit" --dry-run 2>&1)"
   echo "$uout" | grep -q "Already current" && ok || bad "$name: update-kit.sh --dry-run did not say Already current"
 done
+
+# ---------- 5. a plugin cached with Windows line endings --------------------------------
+# A machine whose Git converts line endings hands the plugin out with CRLF scripts. The install
+# skill's step 3 must still produce a kit whose tools run.
+echo "5. install from a CRLF copy of the plugin"
+has_cr() { [ "$(tr -d '\015' < "$1" | wc -c)" != "$(wc -c < "$1")" ]; }
+CP="$TMP/plugin-crlf"; cp -R "$PLUGIN" "$CP"
+find "$CP/kit" -type f \( -name '*.sh' -o -name 'pre-push' -o -name '*.lock' \) | while read -r f; do
+  awk '{ printf "%s\r\n", $0 }' "$f" > "$f.crlf" && cat "$f.crlf" > "$f" && rm -f "$f.crlf"
+done
+has_cr "$CP/kit/tools/status.sh" && ok || bad "could not build a CRLF copy"
+R="$TMP/repo-crlf"; mkdir -p "$R"; cd "$R" || exit 1
+git init -q . >/dev/null 2>&1; echo app > app.txt
+git "${GITQ[@]}" add -A >/dev/null 2>&1; git "${GITQ[@]}" commit -qm init >/dev/null 2>&1
+crlf_step3="$(printf '%s\n' "$step3" | sed "s#$PLUGIN#$CP#g")"
+( eval "$crlf_step3" ) >"$R/install.log" 2>&1 && ok || bad "crlf: the skill's step 3 failed ($(tail -1 "$R/install.log"))"
+has_cr .pipeline/tools/status.sh && bad "crlf: carriage returns survived the install" || ok
+out="$(timeout 180 bash .pipeline/tools/status.sh 2>&1)"
+echo "$out" | grep -q "Pipeline status" && ok || bad "crlf: status.sh did not run from a CRLF-origin install"
+echo "$out" | grep -qiE "command not found|syntax error" && bad "crlf: status.sh hit a shell error" || ok
 
 cd "$KIT" || exit 1
 echo

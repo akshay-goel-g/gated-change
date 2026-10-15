@@ -42,9 +42,14 @@ Two later steps change files **outside** `.pipeline/`. Ask separately for each, 
 ```bash
 cp -R "${CLAUDE_PLUGIN_ROOT}/kit" .pipeline
 rm -f .pipeline/.built-by-build-plugin
+find .pipeline -type f \( -name '*.sh' -o -name 'pre-push' -o -name '*.lock' \) | while read -r f; do tr -d '\r' < "$f" > "$f.lf" && cat "$f.lf" > "$f" && rm -f "$f.lf"; done
 mkdir -p .pipeline/project && cp -R .pipeline/templates/project/. .pipeline/project/
 touch .pipeline/ledger.jsonl
 ```
+
+The `find` line strips carriage returns from the scripts. A plugin cached on a machine whose Git
+converts line endings would otherwise hand bash scripts with CRLF, which fail with
+`$'\r': command not found`. It changes nothing on a machine where they are already LF.
 
 ## 4. Answer the five questions
 
