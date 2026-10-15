@@ -1,0 +1,20 @@
+*.sh text eol=lf
+templates/pre-push text eol=lf
+# VERSION was the one tracked extensionless file with no eol rule, so a Windows
+# checkout with core.autocrlf=true landed it as CRLF. Every tool that reads it
+# strips \r defensively, but the test that asserts <removed-packer> uses it did not
+# — which is why that test failed on every Windows run in this repo's history
+# and was written off as unrelated. Pinned here so the file is LF everywhere.
+VERSION text eol=lf
+*.md text eol=lf
+*.conf text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+
+# ledger.jsonl is append-only JSONL and is deliberately NOT union-merged. Union kept every line but
+# lost the order the verdicts depend on (ours-then-theirs, so "latest" followed merge direction):
+# a newer FAIL read PASS, a restart from one branch lowered another's tier floor, a sibling branch's
+# pass cleared this branch's FAIL (the kit's risk register, R-008). Without it two branches that both log
+# gates conflict, which makes a person look. Keep both sides' lines in the order they were logged,
+# then re-run `compliance` and re-log any gate whose pass came from the other branch.

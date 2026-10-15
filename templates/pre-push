@@ -1,0 +1,465 @@
+#!/bin/sh
+#
+# Pre-push hook — the only enforcement point that survives a tired Friday.
+#
+# Install:
+#   bash .pipeline/tools/install-hook.sh
+#   (or: cp templates/pre-push .git/hooks/pre-push && chmod +x .git/hooks/pre-push)
+#
+# It cannot judge quality. It can refuse to let a trust-boundary diff leave the
+# machine with no evidence that a security review looked at THIS commit.
+#
+# WHICH FILES ARE TRUST BOUNDARIES IS NOT WRITTEN HERE. It is derived from the
+# T4 rows of project/surfaces.conf, which is where that question is already
+# answered. This file used to restate them, with a placeholder to fill in —
+# and the placeholder, `<your|trust|boundary|paths>`, was a valid extended
+# regex. Copied unedited per the README it installed cleanly, ran on every
+# push, matched "trust" and "boundary" and nothing anyone actually has, and
+# reported success by saying nothing at all. A hook that prints only on failure
+# has no way to tell you it is asleep.
+#
+# Env:
+#   TRUST=<regex>        override the derived rules (kit not at .pipeline/)
+#   PIPELINE_DIR=<path>  where the kit lives            (default: .pipeline)
+#   BASE=<ref>           what to diff against           (default: as below)
+
+# Ignore SIGPIPE. If whoever runs `git push` pipes its output into something that exits early
+# (`git push 2>&1 | head -2`), the first echo after the pipe closes would KILL this hook with
+# SIGPIPE (rc 141) before it reached its `exit 1`, and git treats a hook that died of a signal
+# as success -- the push went through after printing BLOCKED. Writes now just fail, quietly.
+trap '' PIPE
+
+# install-hook.sh rewrites the PIPELINE_DIR line in the copy it installs, pointing it at
+# wherever the kit actually is relative to the repo root — "." when the kit IS
+# the repo, which is how gated-change runs this hook on itself.
+PIPELINE_DIR="${PIPELINE_DIR:-.pipeline}"
+SURFACES="${SURFACES:-$PIPELINE_DIR/project/surfaces.conf}"
+REPORTS="${REPORTS:-$PIPELINE_DIR/security-reports}"
+
+# Derive the T4 rules from the surfaces file. Split on the LAST "::" the same
+# way reconcile.sh does, because a regex may contain ":" freely.
+if [ -z "${TRUST:-}" ] && [ -f "$SURFACES" ]; then
+  TRUST=$(grep '^T4::' "$SURFACES" \
+          | sed -e 's/^T4:://' -e 's/\(.*\)::.*/\1/' \
+          | tr '\n' '|' | sed 's/|$//')
+fi
+
+if [ -z "${TRUST:-}" ]; then
+  echo ""
+  echo "BLOCKED — pre-push cannot tell which files are trust boundaries."
+  echo ""
+  if [ -f "$SURFACES" ]; then
+    echo "  It reads the T4 rows of $SURFACES and found none, and TRUST is not set."
+  else
+    echo "  $SURFACES does not exist from here (the kit may live on another branch, or"
+    echo "  PIPELINE_DIR/SURFACES points at the wrong place), and TRUST is not set."
+  fi
+  echo ""
+  echo "  Either fill in your surfaces file, or set TRUST in this hook to a regex"
+  echo "  matching your trust-boundary paths. Refusing to pass silently: a hook that"
+  echo "  protects nothing is worse than no hook, because it looks installed."
+  echo ""
+  echo "  If you do not want this check, delete .git/hooks/pre-push."
+  echo ""
+  exit 1
+fi
+
+# An invalid ERE makes every `grep -E "$TRUST"` below exit 2, which `grep -q ... ||` reads as "no
+# trust file changed": the hook would pass everything having checked nothing (G7 round 19).
+# grep exits 2 on a bad pattern even with empty input.
+printf '' | grep -E -e "$TRUST" >/dev/null 2>&1
+if [ "$?" -eq 2 ]; then
+  echo ""
+  echo "BLOCKED — the trust-boundary pattern is not a valid extended regex, so pre-push cannot"
+  echo "  tell which files are guarded:  $TRUST"
+  echo "  Fix the T4 rows of $SURFACES (or TRUST). Refusing to pass: a hook that checks nothing"
+  echo "  looks installed and protects nothing."
+  echo ""
+  exit 1
+fi
+
+if grep -q 'EXAMPLE from a browser-extension project' "$SURFACES" 2>/dev/null; then
+  echo "pre-push: WARNING — $SURFACES is still the shipped example, so these rules" >&2
+  echo "  are somebody else's trust boundaries. This hook is guarding the wrong files." >&2
+fi
+
+# Fail CLOSED when git cannot compare what is being pushed. The most common cause is a remote
+# commit that is not in this clone (someone else pushed, or a force-push over commits you never
+# fetched): `git diff` then errors, CHANGED comes out empty, and the old code read "nothing
+# changed" as "nothing to guard" and let a trust-boundary change through unreviewed.
+cannot_compare() {
+  echo ""
+  echo "BLOCKED — pre-push cannot compare $1 with $2: git could not diff them."
+  echo "  Most often the remote's commit is not in this clone (someone else pushed, or this is a"
+  echo "  force-push over commits you never fetched). Run:  git fetch   and push again."
+  echo "  If you are sure, 'git push --no-verify' skips this check; log it as an exception in the ledger."
+  echo ""
+  exit 1
+}
+
+# Paths that differ between two trees, one per line. Two traps in plain `git diff --name-only`:
+#   - rename detection is ON by default and prints only the DESTINATION of a rename, so moving a
+#     trust-boundary file out of a guarded path (even with edits in the same commit) listed nothing
+#     that matched $TRUST and the hook passed. --no-renames lists both ends.
+#   - core.quotePath=false stops quoting non-ASCII names, but git still quotes a name containing a
+#     tab, a double quote or a backslash, and an anchored rule such as (^|/)src/auth/ then fails
+#     on the leading quote. -z prints raw names, NUL-separated; they are turned into lines here.
+#     (Not read through $(...) directly: bash drops the NULs and runs the names together.)
+# The exit status is git's own, so callers can fail closed when git cannot diff.
+names_between() {
+  _nt=$(mktemp 2>/dev/null) || return 1
+  if git diff --no-renames --name-only -z "$@" >"$_nt" 2>/dev/null; then
+    tr '\0' '\n' <"$_nt"; _nr=0
+  else
+    _nr=1
+  fi
+  rm -f "$_nt"
+  return $_nr
+}
+
+# Same, for the paths one commit touched (diff-tree never detects renames unless asked).
+# $1 = extra diff-tree flags ("-c" for a merge against all parents, "-m" per parent, "--root").
+commit_paths() {
+  _cf="$1"; shift
+  git diff-tree --no-commit-id --name-only -z -r $_cf "$@" 2>/dev/null | tr '\0' '\n'
+}
+
+# The mode and blob a path has in a commit, or the word "absent" (deleted / never existed there).
+# The mode too: a merge that drops the other side's mode change (an exec bit on a guarded hook)
+# leaves the same blob and used to read as "nothing to account for".
+blob_of() {
+  # literal pathspecs: a file named ":(glob)..." or ":auth/z" must be looked up as itself, not as magic
+  _bo=$(git --literal-pathspecs ls-tree "$1" -- "$2" 2>/dev/null | cut -f1)
+  [ -n "$_bo" ] && echo "$_bo" || echo absent
+}
+
+# Does merge commit $1 (parents $2 $3) do anything to a trust-boundary file that no reviewed
+# non-merge commit in the push accounts for? Two ways it can:
+#   - it edits the file differently from EVERY parent (`diff-tree -c` sees that), or
+#   - it resolves a file that BOTH sides changed by picking a side, or ends a file that only ONE
+#     side changed in something other than that side's version -- which silently discards the
+#     other side's change. `-c` is blind to this when the result equals one parent: a merge that
+#     takes the incoming side of a file and so reverts a change already on the remote lists
+#     nothing. What a correct merge produces is determined by the parents and their merge base,
+#     so the result is compared with that expectation.
+# Returns 0 (= treat the merge as a trust-touching commit) also when git cannot tell.
+merge_bypasses_review() {
+  _m="$1"; _p1="$2"; _p2="$3"
+  commit_paths -c "$_m" | grep -qE -e "$TRUST" && return 0
+  _mb=$(git merge-base "$_p1" "$_p2" 2>/dev/null) || _mb=""
+  _out=$(names_between "$_p1" "$_p2") || return 0
+  _files=$(printf '%s\n' "$_out" | grep -E -e "$TRUST")
+  while IFS= read -r _f; do
+    [ -n "$_f" ] || continue
+    _b1=$(blob_of "$_p1" "$_f"); _b2=$(blob_of "$_p2" "$_f"); _res=$(blob_of "$_m" "$_f")
+    if [ -n "$_mb" ]; then _bm=$(blob_of "$_mb" "$_f"); else _bm=absent; fi
+    if   [ "$_b1" = "$_b2" ]; then _want="$_b1"
+    elif [ "$_b1" = "$_bm" ]; then _want="$_b2"
+    elif [ "$_b2" = "$_bm" ]; then _want="$_b1"
+    else return 0
+    fi
+    [ "$_res" = "$_want" ] || return 0
+  done <<MB_EOF
+$_files
+MB_EOF
+  return 1
+}
+
+# git's fixed empty-tree object; also the "no base" marker in RANGES below.
+EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+# One "<range base> <pushed sha>" line per ref, so the evidence check below can
+# reason about the commits actually being pushed rather than whatever HEAD is.
+RANGES=""
+
+if [ -n "${BASE:-}" ]; then
+  # Explicit override (manual testing, or a kit not at .pipeline/): keep the
+  # single-diff behavior this always had. Same resolution order as
+  # tools/reconcile.sh would use if BASE were left unset there too — not
+  # reused below, see the comment on ORIGIN_BASE for why.
+  CHANGED=$(names_between "$BASE"...HEAD) || cannot_compare "$BASE" HEAD
+  RANGES="$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$EMPTY_TREE") $(git rev-parse HEAD 2>/dev/null)"
+else
+  # git feeds a pre-push hook one line per ref being pushed on stdin:
+  # "<local ref> <local sha> <remote ref> <remote sha>". The old code instead
+  # diffed unconditionally against a resolved BASE that, for the first push
+  # of a new repo, is very often the branch being pushed itself — `main`
+  # resolves locally to the exact commit being pushed, before the remote has
+  # ever seen it, so `git diff BASE...HEAD` compared a branch to itself, was
+  # always empty, and the hook exited 0 having checked nothing. A repo's
+  # first push is often the one that adds everything, including the trust
+  # boundaries this hook exists to guard, so that was the push most
+  # important to catch.
+  #
+  # A remote sha of all zeros means the remote has no such ref yet — a new
+  # branch. There, diff from the merge-base with ORIGIN_BASE instead of from
+  # ORIGIN_BASE itself, so a branch that already diverged from it doesn't
+  # have its own prior commits flagged as newly pushed.
+  #
+  # ORIGIN_BASE deliberately does NOT fall back to a local main/master or
+  # HEAD~1 the way tools/reconcile.sh's BASE resolution does. Those exist
+  # there for a human diffing local work against local trunk; here, on
+  # exactly the first-push case this rewrite is fixing, the local branch IS
+  # the branch being pushed, so a merge-base against it is a merge-base
+  # against itself — the same empty-diff bug back under a different name.
+  # Only a remote-tracking ref actually proves the remote has already seen
+  # that history. When none resolves (no remote configured yet, or this is
+  # the very first push this repo has ever made), git's fixed empty-tree
+  # object stands in instead, so the diff covers everything being added
+  # rather than silently narrowing to nothing.
+  # EXACT refs only, and the answer is the object id git's ref store holds, never a name handed back to git
+  # (G7 round 28): `rev-parse --verify refs/remotes/origin/main` falls back to git's name search when that
+  # ref is missing and finds a TAG called `refs/remotes/origin/main` -- which a plain `git fetch` delivers --
+  # so the tag chose the base and dropped the unreviewed trust commits from the pushed range.
+  # `show-ref --verify` matches the full ref name and nothing else. A dangling origin/HEAD target falls
+  # through to the next candidate, and to the empty tree when none exists (the whole push is checked).
+  ORIGIN_BASE=""
+  _ob_head=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null) || _ob_head=""
+  for _ob_cand in "$_ob_head" refs/remotes/origin/main refs/remotes/origin/master; do
+    [ -n "$_ob_cand" ] || continue
+    if _ob_sha=$(git show-ref --verify --hash "$_ob_cand" 2>/dev/null) && [ -n "$_ob_sha" ]; then
+      ORIGIN_BASE="$_ob_sha"
+      break
+    fi
+  done
+
+  ZERO_SHA="0000000000000000000000000000000000000000"
+  CHANGED=""
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -z "$local_sha" ] && continue
+    [ "$local_sha" = "$ZERO_SHA" ] && continue  # branch deletion, nothing pushed
+
+    if [ "$remote_sha" = "$ZERO_SHA" ]; then
+      if [ -n "$ORIGIN_BASE" ]; then
+        range_base=$(git merge-base "$ORIGIN_BASE" "$local_sha" 2>/dev/null) || range_base="$EMPTY_TREE"
+      else
+        range_base="$EMPTY_TREE"
+      fi
+    else
+      range_base="$remote_sha"
+    fi
+
+    RANGES="$RANGES
+$range_base $local_sha"
+    ref_changed=$(names_between "$range_base" "$local_sha") \
+      || cannot_compare "$range_base" "$local_sha"
+    [ -n "$ref_changed" ] && CHANGED="$CHANGED
+$ref_changed"
+  done
+  CHANGED=$(printf '%s\n' "$CHANGED" | sed '/^$/d' | sort -u)
+fi
+[ -z "$CHANGED" ] && exit 0
+
+# printf, not echo: this hook runs under /bin/sh, which is dash on Debian/Ubuntu, and dash's echo
+# interprets backslash escapes -- a file named `0\c` cut the list at that name and switched the whole
+# check off (G7 round 23). Names are read raw (-z), so every name is attacker-shaped.
+if printf '%s\n' "$CHANGED" | grep -qE -e "$TRUST"; then
+  # Commit-scoped on purpose. An earlier version of this hook accepted any report
+  # from the last seven days — which a report about a completely different change
+  # satisfies trivially. It proved a file existed, not that this diff was reviewed.
+  # A time window is not evidence; a sha is.
+  #
+  # WHICH commit, though: it used to be `git rev-parse HEAD`. A report cannot name
+  # the commit that contains it, so committing the report moved HEAD and re-blocked
+  # the push, forever (E4). The rule now is: some commit in the pushed range, named
+  # by a report, must CONTAIN every commit in that range that touches a trust
+  # boundary (each of them is an ancestor of it, or it). "Contain", not "newest by
+  # date": a report about an unrelated commit merged in from trunk, or a side branch
+  # that never held the trust change, is not evidence about it. Committing the
+  # report afterwards changes nothing, since it only adds commits on top.
+  [ -n "$RANGES" ] || RANGES="$EMPTY_TREE $(git rev-parse HEAD)"
+  # Every sha-looking token in the reports; each is verified against git below, so
+  # prose that merely resembles one is ignored.
+  REPORT_SHAS=$(grep -rhoE '[0-9a-f]{7,40}' "$REPORTS" 2>/dev/null | sort -u)
+  UNREVIEWED=""
+  while read -r rb ls; do
+    [ -n "$ls" ] || continue
+    # A names_between failure is not "no trust file changed": fail closed, the range is unreviewed.
+    _nb=$(names_between "$rb" "$ls") || { UNREVIEWED="${UNREVIEWED}${UNREVIEWED:+ }$ls"; continue; }
+    printf '%s\n' "$_nb" | grep -qE -e "$TRUST" || continue
+    if [ "$rb" = "$EMPTY_TREE" ]; then COMMITS=$(git rev-list "$ls" 2>/dev/null)
+    else COMMITS=$(git rev-list "$rb..$ls" 2>/dev/null); fi
+    # Ordinary commits are judged by their own diff; a two-parent merge by whether it does
+    # something no reviewed commit accounts for (see merge_bypasses_review): a plain reviewed
+    # branch merged with --no-ff is NOT trust-touching, so it does not need a second report;
+    # an octopus merge has no reliable expectation, so any trust file it touches counts.
+    TC=""
+    for c in $COMMITS; do
+      set -- $(git rev-list --parents -n 1 "$c" 2>/dev/null)
+      shift   # drop the commit itself; what is left are its parents
+      if [ $# -le 1 ]; then
+        if commit_paths --root "$c" | grep -qE -e "$TRUST"; then
+          TC="$TC $c"
+        fi
+      elif [ $# -eq 2 ]; then
+        if merge_bypasses_review "$c" "$1" "$2"; then TC="$TC $c"; fi
+      else
+        if commit_paths -m "$c" | grep -qE -e "$TRUST"; then
+          TC="$TC $c"
+        fi
+      fi
+    done
+    [ -n "$TC" ] || TC="$ls"   # nothing finer to name than the pushed tip
+    # KNOWN GAP (R-009 (9)): a non-fast-forward push (force push, or a rebase/reset over a fetched
+    # commit) DISCARDS remote commits that rb..ls does not list, so a discarded trust commit is never
+    # considered, and a reviewed trust commit pushed alongside it carries the revert through (G7
+    # round 19). Requiring "a report names the discarded commit" was tried (rounds 20-21) and does
+    # not close it: the report written when that commit was ADDED names it too. It needs a marker the
+    # old review cannot contain -- tracked as its own change, not patched here.
+    covered=0
+    for tok in $REPORT_SHAS; do
+      x=$(git rev-parse --verify -q "$tok^{commit}" 2>/dev/null) || continue
+      # rev-parse tries ref names before abbreviated shas, so a hex-named tag or branch would count
+      # as review evidence. The token has to be a prefix of the sha it resolved to.
+      case "$x" in "$tok"*) ;; *) continue;; esac
+      # Must be part of THIS push: reachable from the pushed tip, not from its base.
+      git merge-base --is-ancestor "$x" "$ls" 2>/dev/null || continue
+      if [ "$rb" != "$EMPTY_TREE" ] && git merge-base --is-ancestor "$x" "$rb" 2>/dev/null; then continue; fi
+      ok=1
+      for t in $TC; do
+        git merge-base --is-ancestor "$t" "$x" 2>/dev/null || { ok=0; break; }
+      done
+      if [ "$ok" -eq 1 ]; then covered=1; break; fi
+    done
+    [ "$covered" -eq 1 ] || UNREVIEWED="${UNREVIEWED}${UNREVIEWED:+ }$ls"
+  done <<RANGES_EOF
+$RANGES
+RANGES_EOF
+
+  if [ -n "$UNREVIEWED" ]; then
+    echo ""
+    echo "BLOCKED — trust-boundary files changed and no report in $REPORTS names a commit"
+    echo "  that contains all of them (pushing $UNREVIEWED). A report names the commit it"
+    echo "  reviewed; that commit must include every trust-boundary change in the push."
+    echo "  A report is any file in that directory that contains the sha of the commit it reviewed"
+    echo "  (full or abbreviated, e.g. a line 'Reviewed commit: <sha>' -- see core/cards/G7-threat.md)."
+    echo "  It must exist on disk (it need not be committed yet), and the commit must be part of THIS push."
+    echo ""
+    echo "  Files that tripped this:"
+    printf '%s\n' "$CHANGED" | grep -E -e "$TRUST" | sed 's/^/    /'
+    echo ""
+    echo "  Run the Threat gate against that commit, or:"
+    echo "    git push --no-verify"
+    echo "  and, if no G7 pass is on record for this change, log the exception in the ledger:"
+    echo "    bash $PIPELINE_DIR/tools/ledger.sh add --change <name> --gate G7 --tier T4 --round <n> --outcome skipped --note 'why'"
+    echo "  (a skipped entry never revokes an existing G7 pass; it only records that the review was skipped.)"
+    echo ""
+    echo "  The override is expected and allowed. Using it WITHOUT the ledger entry"
+    echo "  is what is not — an unlogged bypass becomes the norm within a month."
+    echo ""
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Dashboard auto-regeneration.
+#
+# tools/dashboard.sh writes a SNAPSHOT — its own header explains why: file://
+# can't fetch a sibling .jsonl, so the ledger is baked into the HTML at
+# generation time. Nothing regenerates that snapshot automatically: not on a
+# ledger write, not on a commit, nothing — so it silently drifts from what
+# the ledger actually says between runs. This hook is the one mechanism in
+# the kit that already fires on every push with no memory dependency (the
+# same property the trust-boundary check above leans on); extending it here,
+# rather than adding a second, differently-installed hook, means the fix
+# reaches every repo that already ran install-hook.sh, with nothing new for
+# anyone to remember to set up.
+#
+# Regenerates unconditionally rather than pre-checking a staleness signal
+# (ledger mtime vs. dashboard.html mtime) — a fresh clone or CI checkout
+# resets file mtimes in an arbitrary order, so "is it stale" from timestamps
+# alone is not trustworthy, and dashboard.sh is a fast, local, no-network
+# bash script; running it costs less than the git diff already done above.
+# Whether to COMMIT the result is decided by comparing content, not by that
+# staleness guess either — with two fields excluded first, both discovered
+# by actually running this in a loop, not by inspection:
+#   - "generated": dashboard.sh bakes a fresh UTC timestamp into the model on
+#     EVERY run (see its own MODEL heredoc). Left in, a raw diff calls that a
+#     change on every push forever, ledger untouched or not.
+#   - "kitCommit": `git rev-parse HEAD` run from the kit directory. When the
+#     kit is embedded (no separate .git under it — the normal install, and
+#     how this repo runs on itself), that resolves to the ENCLOSING repo's
+#     HEAD, which is a different commit after every push, including THIS
+#     hook's own auto-commit. Left in, the committed file's kitCommit always
+#     names the commit BEFORE it was generated — never itself — so the very
+#     next run always sees a "change," commits again, moves HEAD again, and
+#     repeats without end. Caught by watching round 3 of a manual test
+#     create a commit when nothing had changed; see LEARNINGS.md.
+# Excluding kitCommit here doesn't hide a real kit upgrade: if the vendored
+# kit's cards or router actually change, that shows up as a real diff in the
+# gates/matrix/spine fields, which are NOT excluded.
+#
+# Verified empirically, not assumed (see LEARNINGS.md): a commit made by a
+# hook DURING pre-push is NOT what the push already in flight sends — git
+# resolves which sha to transfer before the hook runs, and a ref moved
+# mid-hook does not change that. So the auto-commit below rides out on the
+# NEXT push, not this one. That still satisfies "never more than one push
+# behind": by the time the next push happens, the ledger this hook saw is
+# already reflected in dashboard.html, so there is nothing left to
+# regenerate — the auto-commit from THIS run just goes out with it.
+#
+# What this does NOT fix:
+#   - A commit that is made but never pushed still carries a stale baked-in
+#     dashboard.html until the next push — this only runs at push time.
+#   - `git push --no-verify`, or a clone where install-hook.sh was never
+#     run, gets none of this.
+#   - An already-open http(s) tab does not wait on any of this — that is
+#     what dashboard/app.js's live-fetch mode is for (it re-fetches the
+#     ledger itself, on focus, straight from whatever is serving it). The
+#     two are complementary, not redundant: live-fetch keeps an open tab
+#     current between pushes; this hook keeps the baked-in fallback (and
+#     every file:// viewer) close to current across them.
+DASHBOARD_SH="$PIPELINE_DIR/tools/dashboard.sh"
+LEDGER_FILE="$PIPELINE_DIR/ledger.jsonl"
+DASHBOARD_OUT="$PIPELINE_DIR/dashboard.html"
+
+if [ -f "$DASHBOARD_SH" ] && [ -f "$LEDGER_FILE" ]; then
+  # The committed version, generated-timestamp blanked, to compare against
+  # after regenerating. Empty when dashboard.html isn't tracked yet (first
+  # run in a repo) — everything compares unequal to "", so a first-ever
+  # generation always commits, correctly.
+  #   - "coverage": the unrouted-work panel's data, computed from git HEAD
+  #     rather than from the ledger — so it changes on every commit, including
+  #     the auto-commit THIS block makes. That is the same unbounded-recommit
+  #     shape "kitCommit" produced once already, and adding coverage to the
+  #     model reproduced it immediately: the moment it was baked in,
+  #     test_hook_dashboard_regen_is_a_noop_once_settled failed, which is
+  #     exactly the regression that test was written to catch. Matched as a
+  #     whole LINE because the value contains nested braces (a sed character
+  #     class cannot balance them) and dashboard.sh's MODEL heredoc puts it on
+  #     a line of its own.
+  NORM='s/"generated":"[^"]*"/"generated":""/;s/"kitCommit":"[^"]*"/"kitCommit":""/;s/^"coverage":.*$/"coverage":null,/'
+  PREV_NORM=""
+  git show "HEAD:$DASHBOARD_OUT" >/dev/null 2>&1 && \
+    PREV_NORM=$(git show "HEAD:$DASHBOARD_OUT" 2>/dev/null | sed "$NORM")
+
+  # Capture stderr only — dashboard.sh's normal-run chatter ("Wrote ...",
+  # gate/warning counts) goes there by design (see its own header), and is
+  # worth surfacing on failure, not worth printing on the common no-op path.
+  if DASH_ERR=$(bash "$DASHBOARD_SH" --ledger "$LEDGER_FILE" --out "$DASHBOARD_OUT" 2>&1 >/dev/null); then
+    if [ "$(sed "$NORM" "$DASHBOARD_OUT")" = "$PREV_NORM" ]; then
+      # Only the timestamp moved. Put back exactly what was committed, so a
+      # push that touched no ledger data leaves no working-tree noise at all.
+      git show "HEAD:$DASHBOARD_OUT" > "$DASHBOARD_OUT" 2>/dev/null
+    else
+      git add "$DASHBOARD_OUT"
+      git commit -q -m "auto: regenerate dashboard.html (pre-push)" -- "$DASHBOARD_OUT"
+      # Found by a fresh-context G8 Dogfood run: this commit lands AFTER git
+      # has already computed which commits the in-flight push sends (verified
+      # empirically, not assumed -- see the header comment above), so it never
+      # ships in the push that triggered it. That still satisfies "never more
+      # than one push behind" the header explains, but silently -- a user
+      # would see `git status` report their branch ahead of the remote right
+      # after a push that appeared to succeed, and go looking for why.
+      echo "pre-push: ledger had moved since $DASHBOARD_OUT was last generated -- regenerated and committed." >&2
+      echo "  This commit landed too late to ride out on the push you just ran --" >&2
+      echo "  git already decided what that push sends. Push once more to sync it:" >&2
+      echo "    git push <remote> <branch>   (plain git push needs an upstream)" >&2
+    fi
+  else
+    echo "pre-push: WARNING -- dashboard.sh failed to regenerate:" >&2
+    echo "$DASH_ERR" | sed 's/^/    /' >&2
+    echo "  Pushing with $DASHBOARD_OUT as-is (possibly stale)." >&2
+  fi
+fi
+
+exit 0

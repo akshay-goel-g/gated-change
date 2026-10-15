@@ -1,0 +1,3 @@
+arm,change,predicted_tier,reconciled_tier,commits,gate_minutes_summed,gates_run,findings_total,findings_before_build,findings_after_build,challenged_premise_count,gate_failures,correction_rounds,tests_added,unit_suite_result,e2e_run,interventions
+E,arm-e-blocked-page-pause,T3,T4 (judged false-positive; full T4 gate set run anyway),3,205,10,13,0,13,6,4 (G3 x1 + G4 x1 + G6 x3 across rounds),3,4+,134/134 relevant suites green (2 pre-existing unrelated flakes isolated),yes (e2e break-pause-timer.spec.js + real-browser G8/G3),3 (spend-limit resumes only, no scope change)
+F,arm-f-popup-storage-read,T2,n/a,1,0,0,0,0,0,0,0,0,1,136/136 suites 2787/2787 green,not applicable (no new user-visible flow),0

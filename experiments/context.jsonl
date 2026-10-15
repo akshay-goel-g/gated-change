@@ -1,0 +1,4 @@
+{"type":"context","change":"arm-a-rule-id-overflow","reason":"Bug fix","note":"Rule ID Range Overflow for Large Blocklists — a described defect from docs/V2-BACKLOG.md, not a new feature request.","source":"experiments/001-first-run/design.md:20"}
+{"type":"context","change":"arm-c-auto-resume","reason":"Bug fix","note":"Auto-Resume After Static Mode Ends During a Scheduled Block — a described defect from docs/V2-BACKLOG.md.","source":"experiments/002-second-run/design.md:17"}
+{"type":"context","change":"arm-e-blocked-page-pause","reason":"Bug fix","note":"Blocked Page Timer Doesn't Account for Break Pauses — a described defect from docs/V2-BACKLOG.md.","source":"experiments/003-third-run/design.md:11"}
+{"type":"context","change":"arm-g-whitelist-category","reason":"Bug fix","note":"Whitelist Add Accepts an Orphan Group Id — a described defect from docs/CLAUDE.md's \"Reported but NOT fixed\" note.","source":"experiments/004-fourth-run/design.md:11"}

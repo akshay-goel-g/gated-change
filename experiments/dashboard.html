@@ -1,0 +1,1217 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline dashboard</title>
+<style>
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --border:#dde1e6; --text:#1b1f24; --muted:#6b7280;
+  --accent:#2563eb; --pass:#16a34a; --fail:#dc2626; --warn:#d97706; --skip:#9ca3af;
+  --mono:ui-monospace,Consolas,"SF Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0f1216; --panel:#171b21; --border:#2a2f37; --text:#e6e9ef; --muted:#8b94a3;
+         --accent:#5b9dff; --pass:#3ecf6a; --fail:#f0605a; --warn:#e8a33d; --skip:#5a6270; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans)}
+body{display:flex;flex-direction:column;overflow:hidden}
+
+header{padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel);
+  display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+header h1{font-size:15px;margin:0;font-weight:600}
+header .meta{font-size:12px;color:var(--muted)}
+header .warn-pill{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:10px;padding:1px 8px;cursor:pointer}
+
+#body{flex:1;display:flex;min-height:0}
+#rail{width:340px;border-right:1px solid var(--border);overflow-y:auto;background:var(--panel);flex:0 0 auto}
+#rail .drop{margin:10px;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:11px;color:var(--muted);text-align:center}
+#rail .drop.over{border-color:var(--accent);color:var(--accent)}
+#center{flex:1;overflow:auto;position:relative}
+#graphwrap{padding:20px}
+#drawer{width:0;border-left:1px solid var(--border);overflow-y:auto;background:var(--panel);
+  transition:width .15s ease;flex:0 0 auto}
+#drawer.open{width:420px}
+#drawer .inner{padding:16px;width:420px}
+
+.change-group{border-bottom:1px solid var(--border)}
+.change-head{padding:8px 12px 2px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.exec-row{padding:8px 12px;cursor:pointer;border-left:3px solid transparent;font-size:12px}
+.exec-row:hover{background:var(--bg)}
+.exec-row.selected{background:var(--bg);border-left-color:var(--accent)}
+.exec-row .top{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.exec-row .round{color:var(--muted);font-size:11px}
+.verdict-pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;display:inline-block}
+.verdict-pill.pass{background:color-mix(in srgb, var(--pass) 16%, transparent);color:var(--pass)}
+.verdict-pill.fail{background:color-mix(in srgb, var(--fail) 16%, transparent);color:var(--fail)}
+.verdict-pill.warn{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn)}
+
+.tabbar{display:flex;gap:2px;padding:14px 20px 0;border-bottom:1px solid var(--border);background:var(--panel)}
+.tab{border:none;background:transparent;padding:9px 16px;font-size:13px;color:var(--muted);cursor:pointer;
+  border-bottom:2px solid transparent;font-family:var(--sans)}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+#tabcontent{padding:20px}
+
+.overview{max-width:720px}
+.hero{display:flex;align-items:center;gap:10px;padding:14px 18px;border-radius:10px;margin-bottom:18px;font-size:17px;font-weight:600}
+.hero.pass{background:color-mix(in srgb, var(--pass) 12%, var(--panel));color:var(--pass)}
+.hero.fail{background:color-mix(in srgb, var(--fail) 12%, var(--panel));color:var(--fail)}
+.hero.warn{background:color-mix(in srgb, var(--warn) 12%, var(--panel));color:var(--warn)}
+.hero-icon{font-size:22px}
+
+.overview .section{margin-bottom:20px}
+.overview .section-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+.overview .lead{font-size:14px;line-height:1.5;margin:0 0 6px}
+.overview .muted{font-size:12.5px;color:var(--muted);margin:0}
+
+.reviewers{display:flex;flex-direction:column;gap:2px}
+.reviewer-row{display:flex;align-items:baseline;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.reviewer-row:last-child{border-bottom:none}
+.reviewer-icon{font-size:14px}
+.reviewer-text{font-size:13px;flex:1;min-width:200px}
+.reviewer-persona{font-weight:600}
+
+details{margin-top:2px}
+details summary{font-size:11.5px;color:var(--accent);cursor:pointer;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details summary::before{content:"Show details ▸ ";}
+details[open] summary::before{content:"Hide details ▾ "}
+.detail-body{font-size:11.5px;color:var(--muted);line-height:1.55;margin-top:6px;padding:8px 10px;
+  background:var(--bg);border-radius:6px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word}
+
+svg text{font-family:var(--sans);fill:var(--text)}
+.state-box{fill:var(--panel);stroke:var(--border);stroke-width:1.5}
+.state-box.pass{stroke:var(--pass)}
+.state-box.pass.low{fill:url(#hatch-pass)}
+.state-box.fail{stroke:var(--fail);fill:color-mix(in srgb, var(--fail) 8%, var(--panel))}
+.state-box.missing{stroke:var(--skip);stroke-dasharray:4 3}
+.state-box.notreq{opacity:.32}
+.state-box.choice{fill:var(--panel);stroke:var(--accent)}
+.state-box:hover{stroke-width:2.5;cursor:pointer}
+.state-title{font-size:12px;font-weight:600}
+.state-sub{font-size:10px;fill:var(--muted)}
+.state-status{font-size:10px;font-weight:700;letter-spacing:.02em}
+.state-status.fail{fill:var(--fail)}
+.state-status.pass,.state-status.pass.low{fill:var(--pass)}
+.state-status.missing{fill:var(--skip)}
+.state-status.notreq{fill:var(--muted)}
+.state-verbose{font-size:9px;fill:var(--muted)}
+.state-verbose-more{font-size:8px;fill:var(--accent);font-style:italic}
+
+.bookend{border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;
+  background:var(--panel);max-width:900px}
+.bookend.output{margin-top:14px;margin-bottom:0}
+.bookend-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+.bookend-title{font-size:15px;font-weight:600;margin-bottom:4px}
+.bookend-lens{font-size:11.5px;color:var(--muted);font-style:italic;margin-bottom:8px}
+.bookend-body{font-size:12.5px;line-height:1.55}
+.bookend-cite{font-size:10.5px;color:var(--muted);margin-top:6px}
+.reason-chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;
+  background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);vertical-align:middle}
+.reason-chip.unknown{background:transparent;color:var(--muted);font-weight:400;font-style:italic}
+
+.back-link{border:none;background:transparent;color:var(--accent);font-size:12px;cursor:pointer;
+  padding:0;margin:16px 0 4px 20px;font-family:var(--sans);display:block}
+.back-link:hover{text-decoration:underline}
+#rail-project-head .back-link{margin:12px 12px 2px}
+.rail-project-name{font-size:13px;font-weight:700;padding:2px 12px 10px;border-bottom:1px solid var(--border);margin-bottom:4px}
+
+.projects-overview{padding-bottom:20px}
+.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:0 20px}
+.project-card{border:1px solid var(--border);border-radius:8px;padding:14px 16px;cursor:pointer;background:var(--panel)}
+.project-card:hover{border-color:var(--accent)}
+.project-name{font-size:14px;font-weight:700;margin-bottom:8px}
+.project-stats{display:flex;flex-direction:column;gap:4px}
+.metric{font-size:11.5px;color:var(--text)}
+.metric.warn{color:var(--warn);font-weight:600}
+.metric.muted{color:var(--muted);font-style:italic}
+.bookend-gap{font-size:11px;color:var(--warn);margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.edge{stroke:var(--muted);stroke-width:1.4;fill:none}
+.edge.taken{stroke:var(--accent);stroke-width:2.4}
+.edge.fail-back{stroke:var(--fail);stroke-dasharray:5 4;stroke-width:1.8}
+.edge-label{font-size:9.5px;fill:var(--muted)}
+.edge-label.fail-back{fill:var(--fail)}
+.group-label{font-size:10px;fill:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+
+#drawer h2{font-size:14px;margin:0 0 2px}
+#drawer .persona{font-size:11px;color:var(--muted);margin-bottom:10px}
+#drawer .question{font-size:13px;font-style:italic;margin-bottom:14px;padding:8px 10px;
+  background:var(--bg);border-radius:6px}
+#drawer .field{margin-bottom:10px}
+#drawer .field .k{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px}
+#drawer .field .v{font-size:12px;line-height:1.5}
+#drawer .withhold{color:var(--fail)}
+#drawer .chips{display:flex;flex-wrap:wrap;gap:4px}
+#drawer .chip{font-size:10.5px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+#drawer hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+#drawer .run-empty{font-size:12px;color:var(--muted);font-style:italic}
+#drawer .metric-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px}
+#drawer .budget-bar{height:6px;background:var(--bg);border-radius:3px;overflow:hidden;margin-bottom:10px}
+#drawer .budget-bar i{display:block;height:100%;background:var(--accent)}
+#drawer .budget-bar i.over{background:var(--warn)}
+#drawer .finding{border-left:3px solid var(--skip);padding:4px 8px;margin-bottom:6px;font-size:11.5px}
+#drawer .finding.blocking{border-color:var(--fail)}
+#drawer .finding.minor{border-color:var(--warn)}
+#drawer .finding.info{border-color:var(--accent)}
+#drawer .finding.out-of-scope{border-color:var(--muted)}
+#drawer .finding .loc{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+#drawer pre.note{white-space:pre-wrap;font-family:var(--mono);font-size:11px;background:var(--bg);
+  padding:8px;border-radius:6px;max-height:220px;overflow:auto;line-height:1.5}
+#drawer .close{float:right;cursor:pointer;color:var(--muted);font-size:16px;line-height:1}
+
+#empty{padding:40px;color:var(--muted);font-size:13px}
+.legend{font-size:10.5px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border);
+  display:flex;gap:16px;flex-wrap:wrap}
+.legend b{color:var(--text)}
+#banner{display:none;background:var(--warn);color:#1b1400;padding:6px 16px;font-size:12px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Pipeline dashboard</h1>
+  <span class="meta">kit @ <code id="kit-commit"></code></span>
+  <span class="meta">generated <span id="gen-time"></span></span>
+  <span class="meta">source: <span id="sources"></span></span>
+  <span class="warn-pill" id="warn-pill" style="display:none" title=""></span>
+</header>
+<div id="banner"></div>
+<div id="body">
+  <div id="rail"><div id="rail-project-head"></div><div id="rail-list"></div></div>
+  <div id="center"><div id="graphwrap"></div></div>
+  <div id="drawer"><div class="inner"></div></div>
+</div>
+<div class="legend">
+  <span><b>Read-only.</b> This renders what the ledger already says — it does not run gates.</span>
+  <span><b>Snapshot.</b> Regenerate with <code>bash tools/dashboard.sh</code> after logging new gate runs.</span>
+  <span>Green = pass · hatched green = low-confidence pass (excluded from stats) · red = fail · dashed grey = required, no record · faded = not required at this tier</span>
+  <span>The parallel block shows structural concurrency (the context rule), not measured timing — the ledger has no finer timestamp than a date.</span>
+</div>
+<script>
+const PIPELINE =
+{
+"generated":"2026-08-11T07:39:33Z",
+"kitCommit":"4760fe3",
+"gates":{"G1":{"id":"G1","name":"Intent","persona":"Product manager","question":"Who is this for, what does done mean — and did we build that?","owns":"the ask, and whether it was met","does_not_own":"how it is built (G4) · whether the code is right (G6) · how it looks (G3)","responsible":"Change owner","fires":"T2 recommended · T3+ mandatory","trigger":"[net_new_capability, user_visible_behaviour_change]","input":"the request, in the requester's own words · existing feature docs · for a described defect, whether it still reproduces in current code","withhold":"your implementation plan — G1a must not be shaped by how you intend to build it","context":"same session is fine (this is not a review gate)","output":"specs/<feature>/requirements.md · acceptance table appended after Build","passes_when":"every acceptance criterion maps to something demonstrable","fails_when":"a criterion has no evidence, or \"done\" cannot be stated in two sentences","budget":"10min define + 5min accept","escalate_to":"the requester, when a criterion turns out to be ambiguous","retire_if":"never","phase":"PLAN_GATES","phase":"PLAN_GATES"},"G2":{"id":"G2","name":"Scout","persona":"Analyst","question":"How does the world already solve this, and what does everyone get wrong?","owns":"prior art, and where the opening is","does_not_own":"whether we should build it (G1) · how it looks (G3)","responsible":"Change owner","fires":"recommended for net-new user-facing capability. Never blocks a release","trigger":"[net_new_capability]","input":"the problem statement · public information about existing solutions","withhold":"your intended design — knowing it turns research into confirmation","context":"fresh session preferred","output":"\"Prior art\" section in specs/<feature>/requirements.md","passes_when":"the gap is named, not just the alternatives","fails_when":"the note reads like a feature comparison table","budget":"20min","escalate_to":"G1, if prior art reveals the problem is already solved well","retire_if":"zero influence on scope across 10 net-new features","phase":"PLAN_GATES","phase":"PLAN_GATES"},"G3":{"id":"G3","name":"Craft","persona":"Designer","question":"Does this look and behave like the rest of the product?","owns":"consistency of surface and behaviour with what already exists","does_not_own":"whether it works (G8) · keyboard/contrast/screen-reader (Access, library)","responsible":"Change owner","fires":"recommended at T2+ whenever a UI surface changes. Skip for backend-only","trigger":"[ui_surface, user_facing_copy, new_screen, new_state]","input":"the running change · the existing screens it sits beside","withhold":"the rationale for design choices — judge what a user meets, not what you meant","context":"fresh session preferred","output":"design notes · before/after screenshots for changes to existing surfaces","passes_when":"it is indistinguishable in kind from the screens around it","fails_when":"it works but feels foreign · any unreplaced placeholder asset","budget":"15min","escalate_to":"the requester, when consistency and the request genuinely conflict","retire_if":"zero findings across 10 UI changes","phase":"PLAN_GATES","phase":"PLAN_GATES"},"G4":{"id":"G4","name":"Ripple","persona":"Release engineer","question":"What breaks if this is wrong, and can it ship alone?","owns":"non-local consequences · structure · what exists · standing risk","does_not_own":"line-level correctness (G6) · adversarial reachability (G7)","responsible":"Change owner","fires":"T1 recommended · T2+ mandatory","trigger":"[shared_module, persisted_state, id_or_priority_space, load_order, new_component, new_external_dependency, config_key]","input":"the diff · registry entries whose triggers matched · project/map.md","withhold":"the author's account of what the change does — derive it from the diff","context":"FRESH SESSION REQUIRED","output":"coupling report · updates to project/map.md and project/risks.md in this diff","passes_when":"every triggered registry entry has its check performed, not merely noted","fails_when":"a trigger is hit and unchecked · a new component is absent from the map","budget":"10min","escalate_to":"T4 approver when the change cannot ship independently","retire_if":"never (silent, unbounded failure mode)","phase":"VERIFY_PARALLEL","phase":"VERIFY_PARALLEL"},"G5":{"id":"G5","name":"Proof","persona":"SDET","question":"Would this bug have been caught, and will the next one be?","owns":"evidence that behaviour is verified, on every target","does_not_own":"whether the behaviour is right (G1) · whether the code is good (G6)","responsible":"Change owner","fires":"T1 for any bug fix · T2+ mandatory","trigger":"[bug_fix, new_behaviour, edge_decision_recorded, new_target]","input":"the diff · the edge decision table from design.md · the target list","withhold":"nothing — Proof is not a review gate","context":"same session is fine","output":"tests, plus a registry entry mapping the bug category to its test","passes_when":"the new test FAILS against the unfixed code, and every target has evidence","fails_when":"the test passes before the fix · any target has no evidence","budget":"30min","escalate_to":"Ripple, if a target cannot be tested at all","retire_if":"never","phase":"VERIFY_SEQ","phase":"VERIFY_SEQ"},"G6":{"id":"G6","name":"Peer","persona":"Staff engineer","question":"Is this correct, simple, and consistent with the codebase?","owns":"line-level correctness · simplicity · cleanup of what this diff orphaned","does_not_own":"non-local consequences (G4) · adversarial reachability (G7)","responsible":"Change owner","fires":"T1 recommended · T2+ mandatory","trigger":"[any_code_change]","input":"the diff · the house rules · project/registry.md","withhold":"the author's explanation of what the change does or why it is correct","context":"FRESH SESSION REQUIRED","output":"findings, and fixes for the ones that survive scrutiny","passes_when":"no correctness-affecting finding remains","fails_when":"any finding is correctness-affecting","budget":"15min","escalate_to":"T4 approver on disagreement about whether a finding is real","retire_if":"zero findings across 10 fresh-context runs","phase":"VERIFY_PARALLEL","phase":"VERIFY_PARALLEL"},"G7":{"id":"G7","name":"Threat","persona":"Security engineer","question":"What can a hostile input, a hostile caller, or a confused user do with this?","owns":"adversarial reachability — what an attacker gets to","does_not_own":"correctness and simplicity (G6) · coupling (G4)","responsible":"T4 approver","fires":"T2 when input/persistence/network is touched · T3+ HARD GATE","trigger":"[auth, credential, permission, external_endpoint, user_input, persisted_state, manifest, quota, migration]","input":"the diff · trust-boundary surfaces from surfaces.conf · prior findings","withhold":"the author's threat assessment · the change's stated purpose","context":"FRESH SESSION REQUIRED","output":".pipeline/security-reports/<date>.md — NAMES THE COMMIT SHA IT REVIEWED","passes_when":"no unresolved finding above low","fails_when":"a trust boundary is crossed without a check · privilege grew unremarked","budget":"20min (7c only — 7a costs nothing, 7b is 5min)","escalate_to":"T4 approver. NEVER the author alone","retire_if":"never — silent, unbounded failure mode","phase":"VERIFY_PARALLEL","phase":"VERIFY_PARALLEL"},"G8":{"id":"G8","name":"Dogfood","persona":"A real user","question":"Forget the code. Use the thing. Does it work?","owns":"the lived experience of the change","does_not_own":"the code (G6) · the tests (G5) · visual consistency (G3)","responsible":"Change owner","fires":"T2+ mandatory unless the change is invisible to users","trigger":"[user_visible_behaviour_change, new_screen, changed_flow]","input":"the RUNNING product","withhold":"the source code · the diff · the list of what changed","context":"FRESH SESSION REQUIRED","output":"QA report · screenshots for visible changes","passes_when":"nothing surprised you","fails_when":"anything surprised you","budget":"15min","escalate_to":"G1, when the surprise is that the feature is not what was wanted","retire_if":"never","phase":"VERIFY_PARALLEL","phase":"VERIFY_PARALLEL"}},
+"matrix":{"G1":{"budgetMin":10,"T0":"—","T1":"—","T2":"R","T3":"M","T4":"M"},"G2":{"budgetMin":20,"T0":"—","T1":"—","T2":"R¹","T3":"R¹","T4":"R¹"},"G3":{"budgetMin":15,"T0":"—","T1":"—","T2":"R²","T3":"R²","T4":"R²"},"G4":{"budgetMin":10,"T0":"—","T1":"R","T2":"M","T3":"M","T4":"M"},"G5":{"budgetMin":30,"T0":"—","T1":"R³","T2":"M","T3":"M","T4":"M"},"G6":{"budgetMin":15,"T0":"—","T1":"R","T2":"M","T3":"M","T4":"M"},"G7":{"budgetMin":20,"T0":"—","T1":"—","T2":"R⁴","T3":"M","T4":"M (hard)"},"G8":{"budgetMin":15,"T0":"—","T1":"—","T2":"M⁵","T3":"M⁵","T4":"M"}},
+"footnotes":["¹ Never blocks a release. For net-new user-facing capability only.","² Only when a UI surface changes.","³ **M** for any bug fix — a fix without a regression test is not a fix.","⁴ **M** whenever the change accepts user input, persists data, or makes a network request.","⁵ Skip only when Axis C is *Invisible*."],
+"spine":[
+ {"id":"R0A_TRIAGE","name":"R0a · Triage","sub":"Predict the tier, before work","kind":"task"},
+ {"id":"PLAN_GATES","name":"Plan gates","sub":"Before the code exists","kind":"phase"},
+ {"id":"BUILD","name":"Build","sub":"The change itself","kind":"task"},
+ {"id":"VERIFY_SEQ","name":"Verify","sub":"Against the built change","kind":"phase"},
+ {"id":"VERIFY_PARALLEL","name":"Verify · fresh context","sub":"Blind, independent, no shared data","kind":"parallel"},
+ {"id":"R0B_RECONCILE","name":"R0b · Reconcile","sub":"Did the diff match the prediction?","kind":"choice",
+  "exits":[{"on":"match","label":"actual == predicted","to":"RECORD"},
+           {"on":"under","label":"actual > predicted — STOP, run the higher tier","to":"PLAN_GATES"},
+           {"on":"over","label":"actual < predicted — proceed, note it","to":"RECORD"}]},
+ {"id":"RECORD","name":"Record","sub":"Ledger, handoff, intent log","kind":"task"},
+ {"id":"RELEASE","name":"Release","sub":"","kind":"task"}
+],
+"loops":[
+ {"id":"HARVEST","name":"Harvest","sub":"After any escaped defect or T3/T4 change → a learnings entry, sometimes a registry rule"},
+ {"id":"ADAPT","name":"Adapt","sub":"When Triage finds an uncovered surface → a new gate"}
+],
+"phases":{"PLAN_GATES":"G1 G2 G3","VERIFY_SEQ":"G5","VERIFY_PARALLEL":"G4 G6 G7 G8"},
+"warnings":["core/00-start.md's diagram puts G4 (Ripple) under PLAN GATES, but its card says FRESH SESSION REQUIRED and input: the diff — which does not exist before Build. Card wins (core/02-gates.md:5-7); the diagram is wrong.","G1 budget: router (core/01-router.md) says 10min, the index in core/02-gates.md says 15min. The card is authoritative per core/02-gates.md:5-7."]
+};
+const LEDGERS =
+[{"path":"experiments/001-first-run/ledger.jsonl","project":"gated-change experiments","lines":["{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"predicted\":\"T4\",\"actual\":\"T4\",\"verdict\":\"match\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G1\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":true,\"minutes\":8,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Backlog description (blocklist overflow) does not reproduce - already double-defended. Rescoped to the undefended whitelist twin, which CLAUDE.md itself flags as reported-not-fixed.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G5\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":false,\"minutes\":5,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"New test verified both ways: fails pre-fix (1500 rules built), passes post-fix (capped at 1000). Full unit suite 2784/2784 green.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":14,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"PASS, no correctness defects. One disclosed minor: slice-before-security-filter ordering could drop valid entries in an already-corrupted-storage scenario, inherited unchanged from blocklist twin, not a new defect.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G7\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":14,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Hard gate PASS. Tried id-collision, isSpecificAllowTarget bypass via truncation order, adversarial-ordering privilege escalation - none reachable. Failure direction is fail-closed (dropped entries become blocked, not allowed).\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G8\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":12,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"PASS. Normal UI flow gives clear immediate feedback at the 1000 cap. Noted (pre-existing, not introduced by this diff): if storage ever exceeds 1000 via a non-UI path, buildWhitelistAllowRules now silently drops the tail with no user-facing signal, unlike Chrome-rejected rules which do notify.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-a-rule-id-overflow\",\"tier\":\"T4\",\"gate\":\"G4\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":17,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"PASS. All coupling registry rows checked and satisfied. Independence test: verified in isolation by checking out the commit alone and running full suite (2575/2575). Disagreement: would have added a console.warn on truncation, matching the file's dominant silent-drop-avoidance pattern elsewhere; not a blocker.\"}"]},{"path":"experiments/002-second-run/ledger.jsonl","project":"gated-change experiments","lines":["{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"predicted\":\"T3\",\"actual\":\"T3\",\"verdict\":\"match\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G1\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":false,\"minutes\":6,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Requirement restated and verified reproducible against current code before Build (stopFocusSession confirmed to never call reconcileScheduleState). No premise conflict found this time.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G5\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":false,\"minutes\":12,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"3 new unit tests pin reconcileScheduleState's behavior for the exact sequence; e2e test verified both ways against the real service worker (fails pre-fix, passes post-fix, control test unaffected either way). Full suite 2785/2785 green.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G8\",\"findings\":1,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"FAIL. Manual Stop of a layered Static-on-Automatic session did not suppress - resumed within ~1min identically to natural expiry, silently overriding the user's Stop. Fixed in follow-up commit (manual param); re-running G4/G6/G8 against the final diff.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G4\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Re-run against final diff (both commits). Confirmed caller audit: all 3 system callers correctly omit manual, message handler correctly passes manual:true. No disagreement this run.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G6\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":18,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"PASS. Confirmed manual boolean param is a legitimate exception to the KISS boolean-param rule (carries caller-provenance info the function has no other way to derive). Found a real, pre-existing, out-of-scope asymmetry: handleCompletedSession's away-completion path never calls reconcileScheduleState, so a Static session discovered-late-asleep doesn't auto-resume Automatic the way an on-time end does. Noted for follow-up, not fixed in this diff.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"tier\":\"T3\",\"gate\":\"G8\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"PASS on re-run. Manual-stop-suppresses fix confirmed correct and consistent across all 3 scenarios. Flagged (pre-existing, not introduced by this diff): suppression scope is the whole remaining scheduled block with zero UI feedback, only a console.log - a first-time user has no way to know why Automatic stayed off for hours after a short manual stop.\"}","{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-c-auto-resume\",\"predicted\":\"T3\",\"actual\":\"T3\",\"verdict\":\"match\"}"]},{"path":"experiments/003-third-run/ledger.jsonl","project":"gated-change experiments","lines":["{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"predicted\":\"T3\",\"actual\":\"T4\",\"verdict\":\"under\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G1\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":true,\"minutes\":20,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"G1a: read handleScheduledBreakStart/End + blocked.js before writing criteria; confirmed bug reproduces via real repro test (break-pause-timer.test.js) against unfixed code, 3 assertions failed as expected. Challenged premise: backlog said 'forced break' but forced-break feature was removed (background.js:215-217); actual reachable path is a LAYERED session (Automatic + Static/Pomodoro stacked), not a bare Automatic session, which resets to idle on break-end and never surfaces the bug. Scoped fix narrower than 'every possible break source' — documented explicitly in commit + feature doc.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G5\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"low\",\"challenged_premise\":false,\"minutes\":35,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Verify-both-ways per repo convention: git stash of the 3 fix files, confirmed break-pause-timer.test.js fails (3/7) against unfixed source, git stash pop restored fix, confirmed 7/7 pass. Full unit suite 136 suites/2789 tests green, no new failures. E2e break-pause-timer.spec.js run locally (3/3 passed) against real service worker + blocked.html.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G7\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":20,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh subagent vs 08e12e8. Full trust-boundary trace on pausedDuration/breakStartedAt: both write-only from trusted background SW (alarm-driven), read-only everywhere else incl. <all_urls>-exposed blocked.js; every consumption site clamps negative/undefined; manifest unchanged. No findings above informational. Hard gate at T4, satisfied.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G3\",\"findings\":1,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh subagent vs 08e12e8. FAIL: popup.js:897 updateTimerDisplay computes start+currentState.duration WITHOUT pausedDuration while blocked.js's identical MM:SS countdown widget does — same activeState, two different remaining-time numbers for the same session post-break. Directly contradicted the commit's 'applied everywhere' claim (named 3 sites, omitted this 4th).\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G4\",\"findings\":2,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh subagent vs 08e12e8. FAIL, 2 findings: (1) independently confirmed the popup.js:897 gap G3 found. (2) NEW: stopFocusSession has no phase guard (unlike handleScheduledFocusEnd, which bails at phase!=='focus'), and pausedDuration is only updated when a break ENDS — a manual End-Session click during phase==='break' (button stays clickable, just relabeled) recorded the entire in-progress break as focused time. Same bug class, different reachable path. Also flagged the silent-failure story as weak.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":4,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":18,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh subagent vs 08e12e8. FAIL, 4 correctness findings: confirmed popup.js gap (3rd gate to find it independently). Plus 2 more unpatched sites: (a) handleCompletedSession (background.js ~511-514), same unguarded now-startTime formula. (b) state-recovery.js recoverState() (~86-99) — MORE serious: resume-vs-completed classification itself ignores pausedDuration, so a layered session with accumulated break time can be wrongly classified 'completed' before its true compensated end — the exact scenario the fix's own commit message centers on, unhonored in the recovery path. Noted the new 'Before You Change' rule #7 (03-automatic-scheduler.md) states an invariant the diff itself violated at 3 pre-existing sites.\"}","{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"predicted\":\"T3\",\"actual\":\"T4\",\"verdict\":\"under\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G3\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":12,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Re-run vs d35b8ec (round 2). Verified live in a real headed browser: seeded scenario, blocked.html showed 54:59, popup.html showed 55:00 — original cross-screen inconsistency (40:00 vs 55:00) closed. Residual 1s gap confirmed pre-existing floor/ceil rounding diff in formatMs, unchanged by either commit — cosmetic, not blocking. Confirmed break-phase popup shows static Break with no misleading countdown incl. after 2.5s (no interval leak).\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G4\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":10,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Re-run vs d35b8ec (round 2). Verified via actual tests (24/24 in break-pause-timer.test.js), not commit-message trust, that all 3 round-1 findings are fixed. Independent exhaustive grep for every startTime-elapsed computation found ONE more site the fix's own consumer table omitted: background.js:773 GET_STATE overdue self-heal hook — traced it, confirmed harmless (delegates to schedule-window logic that IS compensated, this site is only an over-eager trigger) — non-blocking, documented not fixed. Also flagged inconsistent typeof-FG_TIMER-guard fallbacks (scheduler.js vs state-recovery.js) as a latent trap. Outcome recorded as pass since the 1 finding was non-blocking by G4's own assessment; challenged_premise true because it found something the commit's consumer table didn't list.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":1,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":20,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Re-run vs d35b8ec (round 2). Confirmed all 3 round-1 findings genuinely closed with worked numeric examples. Found a NEW correctness bug: blocked.js's in-progress-break term computed start+duration+pausedDuration+(now-breakStartedAt)-now — the two now terms cancel algebraically, so displayed remaining time was mathematically CONSTANT for the entire break (proven algebraically, not suspected). Not an edge case — the exact scenario the code's own comment said the term existed to handle. Not caught by round-1's tests (single (state,now) evaluation, never two ticks against the same state — cannot detect a frozen value). Also independently confirmed the guard-inconsistency G4 found, recommended deleting both guards as provably-dead code. Also flagged the fix's own justification for not sharing FG_TIMER with blocked.js/popup.js (citing CLAUDE.md's mirror-for-tests rule) as a mischaracterization — both pages already load other utils/*.js via <script> tags, so sharing was a real option; the 3-way duplication is what let this ship with different, untested behavior per copy.\"}","{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"predicted\":\"T3\",\"actual\":\"T4\",\"verdict\":\"under\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":0,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Re-run vs f221e8f (round 3). PASS, no findings, independently verified not trusted from commit message: confirmed freeze bug genuinely closed (startTimer early-returns with static label BEFORE the interval closure that caused cancellation is even defined); grepped all 6 pausedDuration/breakStartedAt/getPausedCompensation sites, confirmed the other 4 are one-shot (no closure-re-invocation shape) so the bug class cannot recur there. Ran actual tests: 171/171 across 8 relevant files, full suite 2594/2598 (4 = same pre-existing bypass-quota flake, reproduced against true base commit). Confirmed both dead typeof-FG_TIMER guards actually removed (zero grep matches), all 7 claimed test files require timer.js in correct order. Chased the importScripts state-recovery.js-before-timer.js textual ordering as a possible new finding, traced to ground: both only reference FG_TIMER inside function bodies not at module-eval time, genuinely harmless; confirmed Firefox manifest matches. Offered unprompted design opinion: static-label-no-countdown is the right minimal fix, not a corner cut. Closes a clean 3-round arc: round1 4 findings, round2 confirmed fixed + 1 new bug, round3 clean.\"}","{\"type\":\"gate\",\"date\":\"2026-08-11\",\"change\":\"arm-e-blocked-page-pause\",\"tier\":\"T4\",\"gate\":\"G8\",\"findings\":3,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":25,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh subagent vs final commit f221e8f (blind — no source/diff/docs). FAIL, 3 surprises, but independently CONFIRMED the fix works: checked popup-vs-blocked-page timer agreement at matching instants repeatedly through a real Static session AND a real scheduled Automatic focus block (~20s sampling), matched to the second every time incl. across a browser restart mid-session. 3 findings: (1) schedule blocks under 5min silently fail to save, false success toast, Automatic mode then shows 'no blocks today' with no error — confirmed pre-existing via git diff (options.js not touched by this branch at all); filed as follow-up task_6e9f8c61, not fixed inline. (2) Automatic-mode break view shows static 'In: X / start-end', no live countdown — NOT a new finding: this is G8, blind to the code, independently rediscovering and describing the exact design decision G6 round-3 already validated as the right minimal fix (no live break-remaining indicator; activeState doesn't carry the schedule entry's end time) — G8's own report explicitly said 'not frozen in the stuck/broken sense... genuinely not designed to count down.' Recorded as corroboration, not an open item. (3) Break Glass invisible on permanently-blocklisted sites, no explanation — confirmed pre-existing via git diff (blocked.js's only changed hunk is inside startTimer(), nowhere near setupBypassButton()) and confirmed the hide IS intentional per CLAUDE.md ('permanent blocks cannot be bypassed') but undocumented/unexplained to the user; filed as follow-up task_48eb04eb, not fixed inline. Logged fail honestly per the gate's own binary rule regardless of the scope call, matching arm-g's precedent (experiments/004-fourth-run).\"}"]},{"path":"experiments/004-fourth-run/ledger.jsonl","project":"gated-change experiments","lines":["{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"predicted\":\"T4\",\"actual\":\"T4\",\"verdict\":\"match\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G5\",\"findings\":1,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":false,\"minutes\":20,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Regression test added in category-group-lifecycle.test.js; verified both ways (git stash the fix, 3 assertions fail; restore, full suite 135/2787 green). Bug reproduced pre-fix via throwaway repro before scoping (G1a).\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G4\",\"findings\":6,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":12,\"lane\":\"normal\",\"model\":\"claude-opus\",\"note\":\"Fresh-context subagent, given diff (0df1b56..6f675d7 range, no commit msg) + full registry + independence checklist. 6 findings, none blocking: F2/F3 medium - write-path-only fix leaves already-orphaned entries (import, pre-fix legacy) unhealed, matches this repo's own precedent of healing at multiple layers (isSpecificAllowTarget). F6 medium - silent-failure signal was only console.warn, no user-visible distinction. Also flagged SESSION_HANDOFF.md 'FIXED' claim as overclaiming since only 1 of 2 write paths was covered. Addressed post-review: added render-layer healing in loadWhitelistEntries (options.js) + categoryFallback flag surfaced in toast + softened doc claims.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":7,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":15,\"lane\":\"normal\",\"model\":\"claude-opus\",\"note\":\"Fresh-context subagent. PASS, 7 findings none correctness-affecting in shipped code. Traced all 5 category cases incl. muted-registered (correctly not coerced). F1 (highest priority): the 'orphan id never resolves as muted once coerced' unit test was VACUOUS - passes identically pre/post fix since custom+orphan are both structurally exempt from getDisabledCategoryIds either way. Also: no healing layer for already-stored orphans (echoes G4 F2); validation ran before reject guards (wasted work); dead 'result.category || category' fallback in options.js; 27 comment lines for 7 code lines; comment cited a session-record file not yet in the repo; silent-to-user coercion. Addressed: deleted vacuous test, replaced with categoryFallback-flag test; reordered validation after reject guards; removed dead fallback; trimmed comments + pointed at docs/features/13-whitelist.md instead of external file; added user-visible fallback note in toast.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G7\",\"findings\":10,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":20,\"lane\":\"normal\",\"model\":\"claude-opus\",\"note\":\"Fresh-context subagent, hard gate. PASS - 0 critical/high/medium, 4 low, 6 informational, clears the no-finding-above-low bar. Confirmed no web-reachable path to ADD_TO_WHITELIST (no externally_connectable/content-script relay). Confirmed privilege SHRANK not grew (pre-diff stored any truthy value verbatim; new code collapses non-strings via Set.has to custom). No XSS (Set.has not property lookup), no prototype pollution, DNR allow-rule surface unchanged. 3 disagreements: (1) doc/comment overclaim - fix closes a labeling/manageability gap, not an enforcement gap, since DNR ruleset is byte-identical orphan-id vs custom; (2) settings read should run after the active-session guard; (3) 'stale id != stated intent' rationale weak for the rename case where remapEntryCategory already knows old->new mapping. Report: .gstack/security-reports/2026-08-10-g7-arm-g.md, names commit 6f675d7. Addressed: softened doc/comment claims per finding 1, reordered per finding 2.\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G8\",\"findings\":3,\"outcome\":\"fail\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":25,\"lane\":\"normal\",\"model\":\"claude-sonnet-5\",\"note\":\"Fresh-context subagent, real browser (39 screenshots), no source/diff given. FAIL per gate's own criterion (3 things surprised it), but ALL 3 confirmed pre-existing and NOT caused by this diff: verified via git diff 0df1b56..6f675d7 -- options.js that only addSiteToWhitelist (add form/toast) and loadWhitelistEntries (render) were touched, not rename/delete/dialog code. Findings: (1) renaming a group with adjacent capital letters mangles the stored name (USA Trip Planning -> U S A Trip Planning); (2) deleting a group in one open tab does not live-sync to a second open tab (rename/pause do); (3) a native prompt()/confirm() in one tab freezes clicks in another tab. JUDGMENT CALL: recorded as out-of-scope follow-up (spawn_task filed) rather than fixed in this arm, matching experiments/002-second-run arm-C's precedent for an out-of-scope G6 finding. outcome=fail logged honestly per the gate's own pass/fail rule rather than marked pass to flatter the metric - the gate did its job (found real bugs by exercising the whole feature, not just the diff), they are simply out of this diff's scope.\"}","{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"predicted\":\"T4\",\"actual\":\"T4\",\"verdict\":\"match\"}","{\"type\":\"gate\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"tier\":\"T4\",\"gate\":\"G6\",\"findings\":7,\"outcome\":\"pass\",\"confidence\":\"fresh\",\"challenged_premise\":true,\"minutes\":14,\"lane\":\"normal\",\"model\":\"claude-opus\",\"note\":\"RE-RUN, fresh-context subagent, against 6ad521e (post round-1-fixes). PASS, 7 findings, none correctness-affecting. Confirmed write path + render path correct in every traced case incl. muted-registered. 6/7 prior findings confirmed fixed; F3 (overlong comments) NOT fixed, still ~28 lines. New: F1(med) - e2e test's own claim (dropdown self-heals before write-time coercion) was asserted but never proven by the test itself, traced handleSettingsChange's focus-guard as the mechanism. F2(low) - wrong file cited (CLAUDE.md vs SESSION_HANDOFF.md). F4(low, DRY) - known-allow-group-id predicate now duplicated 3 ways, rule-of-three met. F5-F7 minor. Addressed: settled F1 empirically via a diagnostic script intercepting the real sendMessage payload (confirmed self-heal claim WAS correct - dropdown already read custom, message sent category:custom), then made the e2e test assert the discriminating dropdown value directly instead of just narrating it in a comment. Fixed F2. Trimmed comments further (F3). F4 deliberately NOT extracted - documented why (3 implementations differ enough in shape that forcing one shared primitive risks the wrong-abstraction pattern G6's own card warns against).\"}","{\"type\":\"route\",\"date\":\"2026-08-10\",\"change\":\"arm-g-whitelist-category\",\"predicted\":\"T4\",\"actual\":\"T4\",\"verdict\":\"match\"}"]},{"path":"experiments/context.jsonl","project":"gated-change experiments","lines":["{\"type\":\"context\",\"change\":\"arm-a-rule-id-overflow\",\"reason\":\"Bug fix\",\"note\":\"Rule ID Range Overflow for Large Blocklists — a described defect from docs/V2-BACKLOG.md, not a new feature request.\",\"source\":\"experiments/001-first-run/design.md:20\"}","{\"type\":\"context\",\"change\":\"arm-c-auto-resume\",\"reason\":\"Bug fix\",\"note\":\"Auto-Resume After Static Mode Ends During a Scheduled Block — a described defect from docs/V2-BACKLOG.md.\",\"source\":\"experiments/002-second-run/design.md:17\"}","{\"type\":\"context\",\"change\":\"arm-e-blocked-page-pause\",\"reason\":\"Bug fix\",\"note\":\"Blocked Page Timer Doesn't Account for Break Pauses — a described defect from docs/V2-BACKLOG.md.\",\"source\":\"experiments/003-third-run/design.md:11\"}","{\"type\":\"context\",\"change\":\"arm-g-whitelist-category\",\"reason\":\"Bug fix\",\"note\":\"Whitelist Add Accepts an Orphan Group Id — a described defect from docs/CLAUDE.md's \\\"Reported but NOT fixed\\\" note.\",\"source\":\"experiments/004-fourth-run/design.md:11\"}"]}];
+/* dashboard/app.js — renders PIPELINE (the derived state machine) against
+ * LEDGERS (raw ledger.jsonl lines, inlined by tools/dashboard.sh).
+ *
+ * Read-only by construction: nothing here writes back to a ledger, and there
+ * is no gate prose below — every gate-related string comes from PIPELINE.
+ * A literal gate name or question here would make this a second description
+ * of the pipeline, which core/02-gates.md exists to prevent.
+ */
+(function(){
+"use strict";
+
+var TIERS = ["T0","T1","T2","T3","T4"];
+var GEOM = { W:210, H:82, VGAP:44, COLPITCH:236, GUTTER:70, PAD:32 };
+var SEV_RANK = { blocking:0, minor:1, "out-of-scope":2, info:3 };
+
+// Footnotes are matched to matrix cells by their leading superscript, e.g.
+// footnote "¹ Never blocks a release…" resolves cell "R¹". Parsed once here
+// rather than guessed per-cell, so a 6th footnote needs no code change.
+var FOOTNOTES = {};
+function indexFootnotes(){
+  (PIPELINE.footnotes || []).forEach(function(f){
+    var m = f.match(/^([¹²³⁴⁵])\s*(.*)$/);
+    if (m) FOOTNOTES[m[1]] = m[2];
+  });
+}
+function footnoteText(cell){
+  var m = (cell||"").match(/[¹²³⁴⁵]/);
+  return m ? FOOTNOTES[m[0]] : null;
+}
+
+// The most informative single finding to surface at a glance: the worst
+// severity first, so a glance at a failed gate shows the blocking claim, not
+// whichever finding happened to be logged last.
+function topFinding(details){
+  return details.slice().sort(function(a,b){
+    return (SEV_RANK[a.severity]||9) - (SEV_RANK[b.severity]||9);
+  })[0];
+}
+function shortClaim(run, max){
+  max = max || 130;
+  var text;
+  if (run.finding_details && run.finding_details.length){
+    var f = topFinding(run.finding_details);
+    text = (f.severity + ": " + f.claim);
+  } else if (run.note) {
+    text = run.note;
+  } else {
+    text = run.findings ? (run.findings + " finding(s), no detail recorded") : "no findings";
+  }
+  return text.length > max ? text.slice(0, max-1) + "…" : text;
+}
+
+// The untruncated version, for a "Details" disclosure where cutting a claim
+// off mid-word defeats the point of asking for more detail. Lists EVERY
+// finding, not just the worst one — shortClaim() picks one for a cramped SVG
+// label, but "show me everything" means everything.
+function fullDetail(run){
+  if (run.finding_details && run.finding_details.length){
+    return run.finding_details.map(function(f){
+      return f.severity + (f.location ? " (" + f.location + ")" : "") + ": " + f.claim;
+    }).join("\n");
+  }
+  if (run.note) return run.note;
+  return run.findings ? (run.findings + " finding(s), no detail recorded") : "No findings recorded.";
+}
+
+// ---------------------------------------------------------------- parsing
+var records = [];
+var unparsed = 0;
+var sourceInfo = [];
+
+// Not a ledger record — a cited annotation for a fact the ledger schema has
+// no field for yet (see route's optional --reason). Keyed by change, last one
+// wins if more than one file supplies it.
+var contextByChange = {};
+
+// Composite key everywhere two projects might reuse the same change name —
+// "fix-login-bug" in project A and project B are not the same execution.
+function pkey(project, change){ return project + " " + change; }
+
+function ingest(ledgers){
+  records = []; unparsed = 0; sourceInfo = []; contextByChange = {};
+  (ledgers || []).forEach(function(src){
+    var ok = 0;
+    var proj = src.project || "(unnamed project)";
+    (src.lines || []).forEach(function(lineStr){
+      var line = lineStr.trim();
+      if (!line) return;
+      try {
+        var rec = JSON.parse(line);
+        rec._src = src.path;
+        rec._project = proj;
+        if (rec.type === "context" && rec.change){
+          contextByChange[pkey(proj, rec.change)] = rec;
+        } else {
+          records.push(rec);
+        }
+        ok++;
+      } catch(e){ unparsed++; }
+    });
+    sourceInfo.push({path: src.path, project: proj, count: ok});
+  });
+}
+
+function listProjects(){
+  var seen = {}; var out = [];
+  records.forEach(function(r){
+    if ((r.type === "gate" || r.type === "route") && !seen[r._project]){
+      seen[r._project] = true; out.push(r._project);
+    }
+  });
+  return out.sort();
+}
+
+// Why this ran: prefer a real ledger field (route --reason, forward-looking),
+// fall back to a cited context annotation, and say plainly when neither exists
+// rather than guessing from the change's slug.
+function whyThisRan(cg){
+  var round1 = cg.rounds[0];
+  if (round1 && round1.route && round1.route.reason){
+    return { reason: round1.route.reason, source: null };
+  }
+  var ctx = contextByChange[pkey(cg.project, cg.change)];
+  if (ctx && ctx.reason){
+    return { reason: ctx.reason, note: ctx.note, source: ctx.source };
+  }
+  return null;
+}
+
+function tierNum(t){ var i = TIERS.indexOf(t); return i < 0 ? 0 : i; }
+
+// ---------------------------------------------------------------- executions
+// An execution is one (change, round) pair — one round of review on one
+// change, within one project. Scoped to a single project so two projects
+// reusing a change name never merge into one row.
+function buildExecutions(project){
+  var byChange = {};
+  records.forEach(function(r){
+    if (r.type !== "gate" && r.type !== "route") return;
+    if (r._project !== project) return;
+    var change = r.change || "(unnamed change)";
+    var round = r.round || 1;
+    byChange[change] = byChange[change] || {};
+    var key = round;
+    byChange[change][key] = byChange[change][key] || { project: project, change: change, round: round, gates: [], route: null, date: null };
+    var ex = byChange[change][key];
+    if (r.type === "gate") { ex.gates.push(r); if (!ex.date || r.date > ex.date) ex.date = r.date; }
+    if (r.type === "route") { ex.route = r; if (!ex.date || r.date > ex.date) ex.date = r.date; }
+  });
+
+  var changes = Object.keys(byChange).map(function(change){
+    var rounds = Object.keys(byChange[change]).map(Number).sort(function(a,b){return a-b;})
+      .map(function(rn){ return byChange[change][rn]; });
+    var maxDate = rounds.reduce(function(m,e){ return (e.date && e.date > m) ? e.date : m; }, "");
+    return { project: project, change: change, rounds: rounds, maxDate: maxDate, maxRound: rounds.length ? rounds[rounds.length-1].round : 1 };
+  });
+  changes.sort(function(a,b){ return (b.maxDate||"").localeCompare(a.maxDate||""); });
+  return changes;
+}
+
+// The 5 metrics core/04-ledger.md defines, computed here from the same data
+// the rest of the dashboard already renders — not a second source of truth.
+// Same formulas as tools/ledger.sh's cmd_report/cmd_gates.
+function computeProjectMetrics(project){
+  var recs = records.filter(function(r){ return r._project === project; });
+  var gates = recs.filter(function(r){ return r.type === "gate"; });
+  var routes = recs.filter(function(r){ return r.type === "route"; });
+  var escapes = recs.filter(function(r){ return r.type === "escape"; });
+  var fresh = gates.filter(function(r){ return r.confidence === "fresh"; });
+  var lowConf = gates.filter(function(r){ return r.confidence === "low"; });
+  var totalFindings = gates.reduce(function(s,g){ return s + (g.findings||0); }, 0);
+  var challenged = fresh.filter(function(r){ return r.challenged_premise; }).length;
+  var under = routes.filter(function(r){ return r.verdict === "under"; }).length;
+  var overrun = gates.filter(function(g){
+    var b = (PIPELINE.matrix[g.gate] || {}).budgetMin || 0;
+    return b > 0 && g.minutes > b * 2;
+  }).length;
+
+  return {
+    changeCount: buildExecutions(project).length,
+    gateRuns: gates.length, freshRuns: fresh.length, lowConfRuns: lowConf.length,
+    totalFindings: totalFindings,
+    challengeRate: fresh.length ? challenged / fresh.length : null,
+    routeCount: routes.length,
+    missRate: routes.length ? under / routes.length : null,
+    overrunCount: overrun,
+    escapes: escapes.length,
+    escapeRate: (escapes.length + totalFindings) ? escapes.length / (escapes.length + totalFindings) : null
+  };
+}
+
+function actualTier(ex){
+  if (ex.route && ex.route.actual) return ex.route.actual;
+  var max = "T0";
+  ex.gates.forEach(function(g){ if (g.tier && tierNum(g.tier) > tierNum(max)) max = g.tier; });
+  return max;
+}
+
+function requiredGates(tier){
+  var req = [];
+  Object.keys(PIPELINE.matrix).forEach(function(g){
+    var cell = (PIPELINE.matrix[g][tier] || "");
+    if (cell.indexOf("M") === 0) req.push(g);
+  });
+  return req;
+}
+
+function computeStatus(ex, isLatestRound){
+  var tier = actualTier(ex);
+  var req = requiredGates(tier);
+  var ran = {}; var anyFail = false; var anyOverran = false;
+  ex.gates.forEach(function(g){
+    ran[g.gate] = g;
+    if (g.outcome === "fail") anyFail = true;
+    var budget = (PIPELINE.matrix[g.gate] || {}).budgetMin || 0;
+    if (budget > 0 && g.minutes > budget * 2) anyOverran = true;
+  });
+  var missing = req.filter(function(g){ return !ran[g]; });
+
+  var status;
+  if (anyFail) status = "Failed";
+  else if (missing.length && isLatestRound) status = "Running";
+  else if (missing.length && !isLatestRound) status = "Partial";
+  else status = "Succeeded";
+
+  return {
+    status: status, tier: tier, required: req, missing: missing, gates: ran,
+    underClassified: !!(ex.route && ex.route.verdict === "under"),
+    overClassified: !!(ex.route && ex.route.verdict === "over"),
+    overran: anyOverran
+  };
+}
+
+function findingsBySeverity(ex){
+  var counts = {blocking:0, minor:0, info:0, "out-of-scope":0, uncounted:0};
+  ex.gates.forEach(function(g){
+    if (g.finding_details && g.finding_details.length){
+      g.finding_details.forEach(function(f){ counts[f.severity] = (counts[f.severity]||0) + 1; });
+    } else if (g.findings) {
+      counts.uncounted += g.findings;
+    }
+  });
+  return counts;
+}
+
+// ---------------------------------------------------------------- layout
+// Fixed geometry, single pass. The spine is mostly linear with one
+// fan-out/fan-in for the parallel block — no measurement, no reflow.
+function layout(){
+  var rows = [];
+  PIPELINE.spine.forEach(function(s){
+    if (s.kind === "phase" || s.kind === "parallel"){
+      var gateIds = (PIPELINE.phases[s.id] || "").trim().split(/\s+/).filter(Boolean);
+      if (!gateIds.length) return;
+      rows.push({ kind:"group", state:s, branches: gateIds });
+    } else {
+      rows.push({ kind:"single", state:s });
+    }
+  });
+
+  var maxBranches = rows.reduce(function(m,r){ return r.kind==="group" ? Math.max(m, r.branches.length) : m; }, 1);
+  var canvasW = Math.max(GEOM.W, maxBranches * GEOM.COLPITCH) + 2*(GEOM.GUTTER + GEOM.PAD);
+  var spineX = canvasW / 2;
+
+  var y = GEOM.PAD;
+  var placed = []; // {id, kind ('spine'|'gate'), x, y, w, h, ref, groupState}
+  rows.forEach(function(row){
+    if (row.kind === "single"){
+      placed.push({ id: row.state.id, kind:"spine", x: spineX - GEOM.W/2, y: y, w: GEOM.W, h: GEOM.H, ref: row.state });
+      y += GEOM.H + GEOM.VGAP;
+    } else {
+      var n = row.branches.length;
+      var busY = y - GEOM.VGAP/2;
+      row.branches.forEach(function(gid, i){
+        var bx = spineX + (i - (n-1)/2) * GEOM.COLPITCH - GEOM.W/2;
+        placed.push({ id: gid, kind:"gate", x: bx, y: y, w: GEOM.W, h: GEOM.H, ref: PIPELINE.gates[gid],
+                      groupState: row.state, busY: busY, spineX: spineX });
+      });
+      y += GEOM.H + GEOM.VGAP;
+    }
+  });
+  var canvasH = y + GEOM.PAD;
+  return { placed: placed, canvasW: canvasW, canvasH: canvasH, spineX: spineX };
+}
+
+// ---------------------------------------------------------------- svg helpers
+var SVGNS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, children){
+  var e = document.createElementNS(SVGNS, tag);
+  for (var k in attrs) e.setAttribute(k, attrs[k]);
+  (children||[]).forEach(function(c){ e.appendChild(c); });
+  return e;
+}
+function textEl(x, y, str, cls, maxPx, charPx){
+  var t = el("text", {x:x, y:y, class: cls || ""});
+  t.textContent = fitText(str, maxPx || 190, charPx);
+  return t;
+}
+function fitText(str, px, charPx){
+  var maxChars = Math.floor(px / (charPx || 6.6));
+  if (!str) return "";
+  return str.length > maxChars ? str.slice(0, maxChars-1) + "…" : str;
+}
+
+function outcomeClass(gateId, execStatus){
+  if (!execStatus) return "notreq";
+  var rec = execStatus.gates && execStatus.gates[gateId];
+  if (rec){
+    if (rec.outcome === "fail") return "fail";
+    var cls = "pass";
+    if (rec.confidence === "low") cls += " low";
+    return cls;
+  }
+  if (execStatus.required.indexOf(gateId) >= 0) return "missing";
+  return "notreq";
+}
+
+// One status word and one verbose line per gate box. The verbose line is what
+// makes "what actually failed" visible at a glance instead of behind a click —
+// and a skip always names WHY, from the router's own cell and footnote, never
+// a bare "not required."
+function stateLines(gateId, st){
+  var run = (st.gates && st.gates[gateId]) || null;
+  var cell = (PIPELINE.matrix[gateId] || {})[st.tier] || "—";
+  if (run){
+    var status = run.outcome.toUpperCase() + (run.confidence === "low" ? " (low-confidence)" : "");
+    var mark = run.outcome === "fail" ? "✗ " : "✓ ";
+    return { status: status, verbose: mark + shortClaim(run) };
+  }
+  if (st.required.indexOf(gateId) >= 0){
+    return { status: "NO RECORD", verbose: "Required at " + st.tier + " but never ran — run it, don't backfill." };
+  }
+  if (cell === "—" || cell === ""){
+    return { status: "SKIPPED", verbose: "Not applicable at " + st.tier + " — this gate's card doesn't fire here." };
+  }
+  var fn = footnoteText(cell);
+  return { status: "SKIPPED · " + cell, verbose: fn ? fn : ("Recommended, not mandatory, at " + st.tier + ".") };
+}
+
+// ---------------------------------------------------------------- rendering
+var selectedProject = null; // null = show the Projects overview (only reachable with >1 project)
+var selectedExec = null; // {change, round}
+var selectedState = null;
+var activeTab = "overview"; // "overview" | "technical"
+
+function renderAll(){
+  var projects = listProjects();
+  if (projects.length > 1 && !selectedProject){
+    renderProjectsOverview(projects);
+    document.getElementById("rail").style.display = "none";
+    document.getElementById("drawer").className = "";
+    renderBanner();
+    return;
+  }
+  document.getElementById("rail").style.display = "";
+  if (!selectedProject) selectedProject = projects[0] || null;
+  renderRail();
+  renderCenter();
+  renderDrawer();
+  renderBanner();
+}
+
+function renderProjectsOverview(projects){
+  var wrap = document.getElementById("graphwrap");
+  var html = '<div class="projects-overview"><div class="section-title" style="margin:20px 0 12px 20px">Projects</div><div class="project-grid">';
+  projects.forEach(function(p){
+    var m = computeProjectMetrics(p);
+    html += '<div class="project-card" data-project="' + attr(p) + '">'
+      + '<div class="project-name">' + escapeHtml(p) + '</div>'
+      + '<div class="project-stats">'
+      + '<div>' + m.changeCount + ' change' + (m.changeCount===1?"":"s") + ' tracked</div>'
+      + '<div>' + m.gateRuns + ' gate run(s) · ' + m.totalFindings + ' finding(s)</div>'
+      + metricLine("Reconcile miss rate", m.missRate, 0.30, m.routeCount)
+      + metricLine("Challenge rate", m.challengeRate, null, m.freshRuns)
+      + (m.overrunCount ? '<div class="metric warn">' + m.overrunCount + ' gate run(s) over budget</div>' : '')
+      + escapeLine(m)
+      + '</div></div>';
+  });
+  html += '</div></div>';
+  wrap.innerHTML = html;
+  Array.prototype.forEach.call(wrap.querySelectorAll(".project-card"), function(card){
+    card.addEventListener("click", function(){
+      selectedProject = card.getAttribute("data-project");
+      selectedExec = null; selectedState = null; activeTab = "overview";
+      renderAll();
+    });
+  });
+}
+
+// One metric row, or an honest "not enough data yet" — never a fabricated 0%.
+function metricLine(label, rate, alarmAt, n, suffix){
+  if (rate == null || !n) return '<div class="metric muted">' + label + ': not enough data yet</div>';
+  var pct = Math.round(rate * 100);
+  var alarm = alarmAt !== null && rate >= alarmAt;
+  return '<div class="metric' + (alarm ? ' warn' : '') + '">' + label + ': ' + pct + '%'
+    + (suffix ? ' (' + suffix + ')' : '') + (alarm ? ' ⚠️' : '') + '</div>';
+}
+
+// Escape rate needs its own line, not the generic threshold: core/04-ledger.md
+// gives miss rate a real number (~30%) to alarm at, but escape rate has none —
+// "lower is better," full stop. A rate of exactly 0% is the GOOD outcome, so
+// the alarm has to key off the escape COUNT, not the rate crossing a bound
+// (>= 0 is trivially true for any rate, which is the bug this replaced).
+function escapeLine(m){
+  if (m.escapes + m.totalFindings === 0) return '<div class="metric muted">Escape rate: not enough data yet</div>';
+  var pct = m.escapeRate == null ? 0 : Math.round(m.escapeRate * 100);
+  var alarm = m.escapes > 0;
+  return '<div class="metric' + (alarm ? ' warn' : '') + '">Escape rate: ' + pct + '%'
+    + ' (' + m.escapes + ' escaped)' + (alarm ? ' ⚠️' : '') + '</div>';
+}
+
+function gateIdsInOrder(){
+  return Object.keys(PIPELINE.gates).sort(function(a,b){ return parseInt(a.slice(1),10) - parseInt(b.slice(1),10); });
+}
+
+// The friendly version of a gate's result — same underlying record as
+// stateLines()/shortClaim(), phrased for someone who has never heard of a
+// "fresh-context subagent" or a router footnote. The technical line is one
+// click away in <details>, never deleted, never dumbed down — just deferred.
+function friendlyGateLine(gateId, st){
+  var card = PIPELINE.gates[gateId];
+  var persona = card.persona;
+  var run = st.gates[gateId];
+  var cell = (PIPELINE.matrix[gateId] || {})[st.tier] || "—";
+
+  if (run){
+    var icon, sentence;
+    if (run.outcome === "fail"){
+      var blocking = (run.finding_details||[]).filter(function(f){return f.severity==="blocking";}).length;
+      icon = "❌";
+      sentence = blocking ? (persona + " found " + blocking + " blocking problem" + (blocking>1?"s":"") + ".")
+                           : (persona + " found a problem.");
+    } else if (run.outcome === "skipped"){
+      icon = "⏭️"; sentence = persona + " sat this one out.";
+    } else {
+      icon = "✅";
+      sentence = run.findings > 0
+        ? (persona + " checked closely and left " + run.findings + " note" + (run.findings===1?"":"s") + " — nothing blocking.")
+        : (persona + " checked and found nothing wrong.");
+    }
+    if (run.confidence === "low") sentence += " (A quick self-check, not an independent review.)";
+    return { icon: icon, sentence: sentence, detail: fullDetail(run) };
+  }
+
+  if (st.required.indexOf(gateId) >= 0){
+    return { icon:"⚠️", sentence: persona + " should have reviewed this, but didn't.",
+             detail: "Required at " + st.tier + " — no record. This is a gap, not a decision." };
+  }
+  if (cell === "—" || cell === ""){
+    return { icon:"⏭️", sentence: persona + " doesn't review changes this small.",
+             detail: "Not applicable at " + st.tier + " — this gate's card doesn't fire here." };
+  }
+  var fn = footnoteText(cell);
+  return { icon:"⏭️", sentence: persona + " wasn't needed for this change.",
+           detail: fn || ("Recommended, not mandatory, at " + st.tier + ".") };
+}
+
+function whyChip(cg){
+  var why = whyThisRan(cg);
+  return why ? '<span class="reason-chip" title="'+attr(why.source||"")+'">'+escapeHtml(why.reason)+'</span>'
+             : '<span class="reason-chip unknown">Reason not recorded</span>';
+}
+
+function friendlyAsk(cg){
+  var round1 = cg.rounds[0];
+  var g1 = round1 ? round1.gates.filter(function(g){ return g.gate === "G1"; })[0] : null;
+  var html = '<div class="section"><div class="section-title">What was asked, and why</div>'
+    + '<p class="lead">' + escapeHtml(titleCase(cg.change)) + ' ' + whyChip(cg) + '</p>';
+  if (g1 && g1.note){
+    html += '<details><summary>Show what the reviewer noted about the request</summary>'
+          + '<div class="detail-body">' + escapeHtml(g1.note) + '</div></details>';
+  } else {
+    html += '<p class="muted">The exact request wasn’t recorded in detail for this change.</p>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function friendlyResult(cg){
+  var totalGates = 0, totalFindings = 0;
+  var bySev = { blocking:0, minor:0, info:0, "out-of-scope":0, uncounted:0 };
+  cg.rounds.forEach(function(ex){
+    ex.gates.forEach(function(g){
+      totalGates++;
+      if (g.finding_details && g.finding_details.length){
+        g.finding_details.forEach(function(f){ bySev[f.severity] = (bySev[f.severity]||0) + 1; totalFindings++; });
+      } else if (g.findings){
+        bySev.uncounted += g.findings; totalFindings += g.findings;
+      }
+    });
+  });
+  var last = cg.rounds[cg.rounds.length - 1];
+  var lastSt = computeStatus(last, true);
+  // Same source as "Who reviewed it" (computeStatus's last-write-wins per gate),
+  // not a raw scan for "did this gate ever fail" — otherwise a gate whose earlier
+  // failure was later fixed shows as ✅ above and gets counted as a problem here,
+  // which is the exact contradiction a non-technical reader would catch first.
+  var failN = Object.keys(lastSt.gates).filter(function(g){ return lastSt.gates[g].outcome === "fail"; }).length;
+  var lead = failN === 0
+    ? ("Reviewed by " + totalGates + " expert check" + (totalGates===1?"":"s") + " — nothing blocking was found.")
+    : (failN + " reviewer" + (failN===1?"":"s") + " still found a problem" + (cg.rounds.length>1?" as of the last round":"") + ".");
+
+  var sevParts = ["blocking","minor","out-of-scope","info"]
+    .map(function(k){ return bySev[k] ? bySev[k] + " " + k : null; }).filter(Boolean);
+  if (bySev.uncounted) sevParts.push(bySev.uncounted + " uncounted (older records)");
+
+  var html = '<div class="section"><div class="section-title">The result</div>'
+    + '<p class="lead">' + escapeHtml(lead) + '</p>'
+    + '<details><summary>Show the numbers</summary><div class="detail-body">'
+    + cg.rounds.length + ' review round' + (cg.rounds.length>1?'s':'') + ', ' + totalGates + ' gate run(s), '
+    + totalFindings + ' finding(s) total' + (sevParts.length ? ' (' + escapeHtml(sevParts.join(", ")) + ')' : '') + '.<br>'
+    + 'Final round (' + last.round + '): reconciled at ' + escapeHtml(actualTier(last)) + ', status ' + lastSt.status + '.<br>'
+    + '<span class="muted">This ledger has no record of RELEASE — it can confirm what reviewers found, not that the change actually shipped.</span>'
+    + '</div></details></div>';
+  return html;
+}
+
+function renderOverviewTab(found){
+  var ex = found.ex, cg = found.cg;
+  var st = computeStatus(ex, found.isLatest);
+  var v = VERDICT[st.status] || VERDICT.Running;
+
+  var html = '<div class="overview">'
+    + '<div class="hero ' + v.cls + '"><span class="hero-icon">' + v.icon + '</span><span class="hero-text">' + escapeHtml(v.label) + '</span></div>'
+    + friendlyAsk(cg)
+    + '<div class="section"><div class="section-title">Who reviewed it</div><div class="reviewers">';
+
+  gateIdsInOrder().forEach(function(gid){
+    var line = friendlyGateLine(gid, st);
+    html += '<div class="reviewer-row">'
+          + '<span class="reviewer-icon">' + line.icon + '</span>'
+          + '<span class="reviewer-text"><span class="reviewer-persona">' + escapeHtml(PIPELINE.gates[gid].persona) + '</span>'
+          + ' — ' + escapeHtml(line.sentence) + '</span>'
+          + '<details><summary>Details</summary><div class="detail-body">' + escapeHtml(line.detail) + '</div></details>'
+          + '</div>';
+  });
+  html += '</div></div>' + friendlyResult(cg) + '</div>';
+  return html;
+}
+
+function backToProjectsLink(){
+  return listProjects().length > 1
+    ? '<button class="back-link" id="back-to-projects">← All projects</button>'
+    : '';
+}
+
+function renderCenter(){
+  var wrap = document.getElementById("graphwrap");
+  if (!selectedExec){
+    wrap.innerHTML = backToProjectsLink() + '<div id="empty">Select an execution on the left to see what happened.</div>';
+    wireBackLink(wrap);
+    return;
+  }
+  var found = getExec(selectedProject, selectedExec.change, selectedExec.round);
+  if (!found){ wrap.innerHTML = backToProjectsLink() + '<div id="empty">No such execution.</div>'; wireBackLink(wrap); return; }
+
+  wrap.innerHTML = backToProjectsLink() + '<div class="tabbar">'
+    + '<button class="tab' + (activeTab==="overview"?" active":"") + '" data-tab="overview">Overview</button>'
+    + '<button class="tab' + (activeTab==="technical"?" active":"") + '" data-tab="technical">Technical details</button>'
+    + '</div><div id="tabcontent"></div>';
+  wireBackLink(wrap);
+
+  Array.prototype.forEach.call(wrap.querySelectorAll(".tab"), function(btn){
+    btn.addEventListener("click", function(){
+      activeTab = btn.getAttribute("data-tab");
+      selectedState = null;
+      renderAll();
+    });
+  });
+
+  var content = document.getElementById("tabcontent");
+  if (activeTab === "technical") renderTechnicalTab(content, found);
+  else content.innerHTML = renderOverviewTab(found);
+}
+
+function wireBackLink(wrap){
+  var back = wrap.querySelector("#back-to-projects");
+  if (back) back.addEventListener("click", function(){
+    selectedProject = null; selectedExec = null; selectedState = null;
+    renderAll();
+  });
+}
+
+function renderBanner(){
+  var b = document.getElementById("banner");
+  if (unparsed > 0){
+    b.style.display = "block";
+    b.textContent = unparsed + " ledger line(s) could not be parsed and are omitted. Missing data is shown as missing, not silently dropped.";
+  } else {
+    b.style.display = "none";
+  }
+}
+
+// Pass/fail only, at a glance. A non-technical reader should be able to scan
+// ten of these in five seconds — everything else (why, what, citations) lives
+// one click away on the Overview tab, not here.
+var VERDICT = {
+  Succeeded: { icon:"✅", label:"Success", cls:"pass" },
+  Failed:    { icon:"❌", label:"Fail", cls:"fail" },
+  Running:   { icon:"🔄", label:"In progress", cls:"warn" },
+  Partial:   { icon:"⚠️", label:"Incomplete", cls:"warn" }
+};
+
+function renderRail(){
+  var rail = document.getElementById("rail-list");
+  var changes = buildExecutions(selectedProject);
+  var railHead = document.getElementById("rail-project-head");
+  if (railHead){
+    railHead.innerHTML = listProjects().length > 1
+      ? backToProjectsLink() + '<div class="rail-project-name">' + escapeHtml(selectedProject) + '</div>' : "";
+    wireBackLink(railHead);
+  }
+  if (!changes.length){
+    rail.innerHTML = '<div class="drop" id="dropzone">No gate or route records found.<br>Drop a ledger.jsonl here, or regenerate with<br><code>bash tools/dashboard.sh</code></div>';
+    wireDropzone();
+    return;
+  }
+  var html = "";
+  changes.forEach(function(cg){
+    html += '<div class="change-group"><div class="change-head">'+ escapeHtml(titleCase(cg.change)) +'</div>';
+    cg.rounds.forEach(function(ex){
+      var isLatest = ex.round === cg.maxRound;
+      var st = computeStatus(ex, isLatest);
+      var v = VERDICT[st.status] || VERDICT.Running;
+      var sel = (selectedExec && selectedExec.change === cg.change && selectedExec.round === ex.round) ? " selected" : "";
+      html += '<div class="exec-row'+sel+'" data-change="'+attr(cg.change)+'" data-round="'+ex.round+'">'
+            + '  <div class="top"><span class="verdict-pill '+v.cls+'">'+v.icon+' '+v.label+'</span>'
+            +      (cg.rounds.length > 1 ? '<span class="round">round '+ex.round+' of '+cg.rounds.length+'</span>' : '')
+            +   '</div>'
+            + '</div>';
+    });
+    html += '</div>';
+  });
+  html += '<div class="drop" id="dropzone">Drop another ledger.jsonl to view it</div>';
+  rail.innerHTML = html;
+
+  Array.prototype.forEach.call(rail.querySelectorAll(".exec-row"), function(row){
+    row.addEventListener("click", function(){
+      selectedExec = { change: row.getAttribute("data-change"), round: Number(row.getAttribute("data-round")) };
+      selectedState = null;
+      activeTab = "overview";
+      renderAll();
+    });
+  });
+  wireDropzone();
+
+  if (!selectedExec && changes.length && changes[0].rounds.length){
+    selectedExec = { change: changes[0].change, round: changes[0].rounds[changes[0].rounds.length-1].round };
+    renderCenter();
+    renderDrawer();
+  }
+}
+
+function getExec(project, change, round){
+  var changes = buildExecutions(project);
+  var cg = changes.filter(function(c){ return c.change === change; })[0];
+  if (!cg) return null;
+  var ex = cg.rounds.filter(function(r){ return r.round === round; })[0];
+  return ex ? { ex: ex, cg: cg, isLatest: round === cg.maxRound, hasNextRound: cg.rounds.some(function(r){return r.round > round;}) } : null;
+}
+
+function titleCase(slug){
+  return String(slug||"").replace(/[-_]+/g, " ").replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+}
+
+// The ask, before the pipeline runs. The ledger has no field for the request
+// itself — G1a's own output (specs/<feature>/requirements.md) is the real
+// record of it, and stays outside the ledger. G1's round-1 note is the
+// closest thing the ledger actually has, so it's shown honestly labeled as
+// that, not presented as a verbatim quote. When no G1 ran, the gap is stated
+// plainly rather than papered over.
+function renderAsk(cg){
+  var round1 = cg.rounds[0];
+  var g1 = round1 ? round1.gates.filter(function(g){ return g.gate === "G1"; })[0] : null;
+  var card = PIPELINE.gates.G1;
+  var why = whyThisRan(cg);
+  var html = '<div class="bookend ask">'
+    + '<div class="bookend-label">The ask — before the pipeline runs</div>'
+    + '<div class="bookend-title">' + escapeHtml(titleCase(cg.change)) + ' ' + whyChip(cg) + '</div>'
+    + (why && why.note ? '<div class="bookend-cite">' + escapeHtml(why.note) + (why.source ? ' — <code>'+escapeHtml(why.source)+'</code>' : '') + '</div>' : '')
+    + '<div class="bookend-lens">G1 · Intent asks: “' + escapeHtml(card.question) + '”</div>';
+  if (g1 && g1.note){
+    html += '<div class="bookend-body">' + escapeHtml(g1.note) + '</div>'
+          + '<div class="bookend-cite">From G1’s round 1 review — the closest record of the request this ledger has, not a verbatim quote.</div>';
+  } else {
+    html += '<div class="bookend-gap">No G1 record for this change, so the request itself isn’t captured here. '
+          + 'In a real adoption it lives in <code>specs/&lt;feature&gt;/requirements.md</code> — G1a’s own output, written before Build.</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+// The result, after the pipeline runs. Everything here is computed from
+// ledger facts across every round of this change — nothing is inferred about
+// whether it actually shipped, because the ledger has no RELEASE record type
+// to say so. That gap is stated, not hidden.
+function renderOutput(cg){
+  var totalGates = 0, totalFindings = 0;
+  var bySev = { blocking:0, minor:0, info:0, "out-of-scope":0, uncounted:0 };
+  cg.rounds.forEach(function(ex){
+    ex.gates.forEach(function(g){
+      totalGates++;
+      if (g.finding_details && g.finding_details.length){
+        g.finding_details.forEach(function(f){ bySev[f.severity] = (bySev[f.severity]||0) + 1; totalFindings++; });
+      } else if (g.findings){
+        bySev.uncounted += g.findings; totalFindings += g.findings;
+      }
+    });
+  });
+  var last = cg.rounds[cg.rounds.length - 1];
+  var lastSt = computeStatus(last, true);
+  var finalCommit = (last.route && last.route.commit) || (last.gates[0] && last.gates[0].commit) || null;
+  var sevParts = ["blocking","minor","out-of-scope","info"]
+    .map(function(k){ return bySev[k] ? bySev[k] + " " + k : null; }).filter(Boolean);
+  if (bySev.uncounted) sevParts.push(bySev.uncounted + " uncounted (pre-dates structured findings)");
+
+  var html = '<div class="bookend output">'
+    + '<div class="bookend-label">The result — after the pipeline runs</div>'
+    + '<div class="bookend-body">'
+    + cg.rounds.length + ' review round' + (cg.rounds.length > 1 ? 's' : '') + ', ' + totalGates + ' gate run(s), '
+    + totalFindings + ' finding(s) total' + (sevParts.length ? ' (' + escapeHtml(sevParts.join(", ")) + ')' : '') + '.<br>'
+    + 'Final round (' + last.round + '): reconciled at <b>' + escapeHtml(actualTier(last)) + '</b>'
+    + (finalCommit ? ', last commit reviewed <code>' + escapeHtml(finalCommit) + '</code>' : '')
+    + ', status <b>' + lastSt.status + '</b>.'
+    + '</div>'
+    + '<div class="bookend-gap">This ledger has no record of RELEASE — it can confirm what the gates found, not that the change shipped. '
+    + 'The reconciled tier and last commit reviewed are the closest signal available.</div>'
+    + '</div>';
+  return html;
+}
+
+function renderTechnicalTab(container, found){
+  var ex = found.ex;
+  var st = computeStatus(ex, found.isLatest);
+
+  container.innerHTML = renderAsk(found.cg) + '<div id="svghost"></div>';
+
+  var L = layout();
+  var svg = el("svg", { viewBox: "0 0 "+L.canvasW+" "+L.canvasH, width:"100%",
+                         preserveAspectRatio:"xMidYMin meet", height: Math.min(L.canvasH, 780) });
+
+  // hatch pattern for low-confidence passes
+  var defs = el("defs", {}, [
+    (function(){
+      var p = el("pattern", {id:"hatch-pass", width:6, height:6, patternTransform:"rotate(45)", patternUnits:"userSpaceOnUse"});
+      p.appendChild(el("rect", {width:6, height:6, fill:"var(--panel)"}));
+      p.appendChild(el("line", {x1:0,y1:0,x2:0,y2:6, stroke:"var(--pass)", "stroke-width":2, opacity:0.35}));
+      return p;
+    })(),
+    (function(){
+      var m = el("marker", {id:"arrow", viewBox:"0 0 10 10", refX:9, refY:5, markerWidth:7, markerHeight:7, orient:"auto-start-reverse"});
+      m.appendChild(el("path", {d:"M0,0 L10,5 L0,10 z", fill:"var(--muted)"}));
+      return m;
+    })(),
+    (function(){
+      var m = el("marker", {id:"arrow-accent", viewBox:"0 0 10 10", refX:9, refY:5, markerWidth:7, markerHeight:7, orient:"auto-start-reverse"});
+      m.appendChild(el("path", {d:"M0,0 L10,5 L0,10 z", fill:"var(--accent)"}));
+      return m;
+    })(),
+    (function(){
+      var m = el("marker", {id:"arrow-fail", viewBox:"0 0 10 10", refX:9, refY:5, markerWidth:7, markerHeight:7, orient:"auto-start-reverse"});
+      m.appendChild(el("path", {d:"M0,0 L10,5 L0,10 z", fill:"var(--fail)"}));
+      return m;
+    })()
+  ]);
+  svg.appendChild(defs);
+
+  var byId = {}; L.placed.forEach(function(p){ byId[p.id] = p; });
+
+  // spine + fan edges, drawn before boxes
+  var prevSpineY = null, prevSpineBottom = null;
+  var lastGroupBusY = null;
+  PIPELINE.spine.forEach(function(s, idx){
+    var isGroup = (s.kind === "phase" || s.kind === "parallel");
+    var members = isGroup ? L.placed.filter(function(p){ return p.groupState === s; }) : [byId[s.id]];
+    if (!members.length || !members[0]) return;
+    var topY = members[0].y;
+    var midX = isGroup ? members[0].spineX : (members[0].x + members[0].w/2);
+
+    if (prevSpineBottom !== null){
+      if (isGroup){
+        var busY = members[0].busY;
+        svg.appendChild(el("path", {class:"edge", d:"M "+midX+","+prevSpineBottom+" V "+busY, "marker-end":"url(#arrow)"}));
+        members.forEach(function(m){
+          var bx = m.x + m.w/2;
+          svg.appendChild(el("path", {class:"edge", d:"M "+midX+","+busY+" H "+bx+" V "+m.y}));
+        });
+      } else {
+        svg.appendChild(el("path", {class:"edge", d:"M "+midX+","+prevSpineBottom+" V "+topY, "marker-end":"url(#arrow)"}));
+      }
+    }
+    if (isGroup){
+      var bottomY = members[0].y + members[0].h;
+      var fanBusY = bottomY + GEOM.VGAP/2;
+      members.forEach(function(m){
+        var bx = m.x + m.w/2;
+        svg.appendChild(el("path", {class:"edge", d:"M "+bx+","+(m.y+m.h)+" V "+fanBusY}));
+      });
+      svg.appendChild(el("path", {class:"edge", d:"M "+midX+","+fanBusY+" V "+fanBusY}));
+      prevSpineBottom = fanBusY;
+    } else {
+      prevSpineBottom = topY + GEOM.H;
+    }
+  });
+
+  // R0b taken-exit label
+  var r0b = byId["R0B_RECONCILE"];
+  if (r0b && ex.route){
+    var verdict = ex.route.verdict;
+    var exitDef = (r0b.ref.exits || []).filter(function(x){ return x.on === verdict; })[0];
+    if (exitDef){
+      svg.appendChild(textEl(r0b.x + r0b.w + 10, r0b.y + r0b.h/2 - 4, "▸ "+exitDef.label, "edge-label taken", 260));
+    }
+  }
+
+  // failure back-edge: a fail in this round + a next round exists
+  if (found.hasNextRound){
+    var failedGates = ex.gates.filter(function(g){ return g.outcome === "fail"; });
+    var build = byId["BUILD"];
+    failedGates.forEach(function(g, i){
+      var gp = byId[g.gate];
+      if (!gp || !build) return;
+      var outX = L.canvasW - GEOM.PAD/2 + i*4;
+      var midY = gp.y + gp.h/2;
+      var path = "M "+(gp.x+gp.w)+","+midY+" H "+outX+" V "+(build.y+build.h/2)+" H "+(build.x+build.w);
+      svg.appendChild(el("path", {class:"edge fail-back", d:path, "marker-end":"url(#arrow-fail)"}));
+      svg.appendChild(textEl(outX+4, midY - 6, "fail → round "+(ex.round+1), "edge-label fail-back", 140));
+    });
+  }
+
+  // states
+  L.placed.forEach(function(p){
+    var g = el("g", {class:"state", "data-id":p.id, transform:"translate(0,0)"});
+    if (p.kind === "spine" && p.ref.kind === "choice"){
+      var cx = p.x + p.w/2, cy = p.y + p.h/2, hw = p.w/2, hh = p.h/2;
+      g.appendChild(el("polygon", {class:"state-box choice", points:
+        [cx+","+(cy-hh), (cx+hw)+","+cy, cx+","+(cy+hh), (cx-hw)+","+cy].join(" ")}));
+      g.appendChild(textEl(cx, cy-2, p.ref.name, "state-title", p.w-20)).setAttribute("text-anchor","middle");
+      g.appendChild(textEl(cx, cy+13, p.ref.sub, "state-sub", p.w-20)).setAttribute("text-anchor","middle");
+    } else if (p.kind === "spine") {
+      g.appendChild(el("rect", {class:"state-box", x:p.x, y:p.y, width:p.w, height:p.h, rx:8}));
+      g.appendChild(textEl(p.x+12, p.y+24, p.ref.name, "state-title", p.w-24));
+      g.appendChild(textEl(p.x+12, p.y+42, p.ref.sub, "state-sub", p.w-24));
+    } else {
+      var oc = outcomeClass(p.id, st);
+      var lines = stateLines(p.id, st);
+      g.appendChild(el("rect", {class:"state-box "+oc, x:p.x, y:p.y, width:p.w, height:p.h, rx:8}));
+      g.appendChild(textEl(p.x+10, p.y+18, p.id+" · "+p.ref.name, "state-title", p.w-20));
+      g.appendChild(textEl(p.x+10, p.y+32, p.ref.persona, "state-sub", p.w-20));
+      g.appendChild(textEl(p.x+10, p.y+47, lines.status, "state-status "+oc, p.w-20));
+      g.appendChild(textEl(p.x+10, p.y+62, lines.verbose, "state-verbose", p.w-20, 5.1));
+      g.appendChild(textEl(p.x+10, p.y+75, lines.verbose.length > Math.floor((p.w-20)/5.1) ? "(click for full text)" : "", "state-verbose-more", p.w-20));
+      var full = el("title", {});
+      full.textContent = lines.verbose;
+      g.appendChild(full);
+    }
+    g.addEventListener("click", function(){ selectedState = p.id; renderAll(); });
+    svg.appendChild(g);
+  });
+
+  if (selectedState && byId[selectedState]){
+    var sp = byId[selectedState];
+    svg.appendChild(el("rect", {x:sp.x-3, y:sp.y-3, width:sp.w+6, height:sp.h+6, fill:"none",
+      stroke:"var(--accent)", "stroke-width":2, rx:10, "pointer-events":"none"}));
+  }
+
+  document.getElementById("svghost").appendChild(svg);
+  container.insertAdjacentHTML("beforeend", renderOutput(found.cg));
+}
+
+function attr(s){ return escapeHtml(s).replace(/"/g,"&quot;"); }
+function escapeHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+// ---------------------------------------------------------------- drawer
+function renderDrawer(){
+  var d = document.getElementById("drawer");
+  if (!selectedState || !selectedExec){ d.className=""; d.querySelector(".inner").innerHTML=""; return; }
+
+  var card = PIPELINE.gates[selectedState];
+  var spineDef = PIPELINE.spine.filter(function(s){return s.id===selectedState;})[0];
+  var found = getExec(selectedProject, selectedExec.change, selectedExec.round);
+  var run = found ? found.ex.gates.filter(function(g){return g.gate===selectedState;})[0] : null;
+
+  var html = '<span class="close" id="drawer-close">✕</span>';
+
+  if (card){
+    html += '<h2>'+card.id+' · '+escapeHtml(card.name)+'</h2>';
+    html += '<div class="persona">'+escapeHtml(card.persona)+'</div>';
+    html += '<div class="question">“'+escapeHtml(card.question)+'”</div>';
+    html += field("Input", card.input.split(" · ").map(function(c){return '<span class="chip">'+escapeHtml(c)+'</span>';}).join(" "), true);
+    html += field("Withhold", escapeHtml(card.withhold), false, "withhold");
+    html += field("Context", escapeHtml(card.context));
+    html += field("Owns", escapeHtml(card.owns));
+    html += field("Does not own", escapeHtml(card.does_not_own));
+    html += field("Output", escapeHtml(card.output));
+    html += field("Passes when", escapeHtml(card.passes_when));
+    html += field("Fails when", escapeHtml(card.fails_when));
+    html += field("Escalate to", escapeHtml(card.escalate_to));
+
+    html += '<hr>';
+    if (run){
+      var budget = (PIPELINE.matrix[card.id]||{}).budgetMin || 0;
+      var pct = budget ? Math.min(100, (run.minutes/budget)*100) : 0;
+      var over = budget && run.minutes > budget*2;
+      html += '<div class="metric-row"><span>outcome</span><b>'+escapeHtml(run.outcome)+'</b></div>';
+      html += '<div class="metric-row"><span>confidence</span><b>'+escapeHtml(run.confidence)+(run.confidence==="low"?' (excluded from stats)':'')+'</b></div>';
+      html += '<div class="metric-row"><span>challenged premise</span><b>'+(run.challenged_premise?"yes":"no")+'</b></div>';
+      html += '<div class="metric-row"><span>model</span><b>'+escapeHtml(run.model||"—")+'</b></div>';
+      html += '<div class="metric-row"><span>commit</span><b>'+escapeHtml(run.commit||"—")+'</b></div>';
+      html += '<div class="metric-row"><span>minutes vs budget</span><b>'+run.minutes+'m / '+(budget||"?")+'m</b></div>';
+      html += '<div class="budget-bar"><i class="'+(over?"over":"")+'" style="width:'+pct+'%"></i></div>';
+
+      if (run.finding_details && run.finding_details.length){
+        run.finding_details.forEach(function(f){
+          html += '<div class="finding '+f.severity+'"><b>'+f.severity+'</b> '
+                + (f.location ? '<div class="loc">'+escapeHtml(f.location)+'</div>' : '<div class="loc">(no citation)</div>')
+                + '<div>'+escapeHtml(f.claim)+'</div></div>';
+        });
+      } else if (run.findings > 0) {
+        html += '<div class="run-empty">'+run.findings+' finding(s) recorded as a count only — before structured findings existed.</div>';
+      } else {
+        html += '<div class="run-empty">No findings. Passes when: '+escapeHtml(card.passes_when)+'</div>';
+      }
+      if (run.note) html += '<div class="field"><div class="k">Log</div><pre class="note">'+escapeHtml(run.note)+'</pre></div>';
+    } else {
+      var noRunSt = computeStatus(found.ex, found.isLatest);
+      html += '<div class="run-empty">No record for this gate in round '+selectedExec.round+'. ' + escapeHtml(stateLines(card.id, noRunSt).verbose) + '</div>';
+    }
+  } else if (spineDef){
+    html += '<h2>'+escapeHtml(spineDef.name)+'</h2>';
+    html += '<div class="persona">'+escapeHtml(spineDef.sub||"")+'</div>';
+    if (spineDef.id === "R0B_RECONCILE" && found.ex.route){
+      var r = found.ex.route;
+      html += field("Predicted", escapeHtml(r.predicted));
+      html += field("Actual", escapeHtml(r.actual));
+      html += field("Verdict", escapeHtml(r.verdict));
+    }
+  }
+
+  d.className = "open";
+  d.querySelector(".inner").innerHTML = html;
+  document.getElementById("drawer-close").addEventListener("click", function(){ selectedState=null; renderAll(); });
+}
+function field(label, val, chips, cls){
+  return '<div class="field"><div class="k">'+label+'</div><div class="v'+(cls?(' '+cls):'')+'">'+val+'</div></div>';
+}
+
+// ---------------------------------------------------------------- drop zone
+function wireDropzone(){
+  var dz = document.getElementById("dropzone");
+  if (!dz) return;
+  ["dragover","dragenter"].forEach(function(ev){
+    dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.add("over"); });
+  });
+  ["dragleave","drop"].forEach(function(ev){
+    dz.addEventListener(ev, function(e){ e.preventDefault(); dz.classList.remove("over"); });
+  });
+  dz.addEventListener("drop", function(e){
+    var f = e.dataTransfer.files[0];
+    if (!f) return;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var proj = f.name.replace(/\.jsonl?$/i, "");
+      ingest([{ path: f.name, project: proj, lines: String(reader.result).split("\n") }]);
+      selectedProject = null; selectedExec = null; selectedState = null;
+      renderAll();
+    };
+    reader.readAsText(f);
+  });
+}
+
+// ---------------------------------------------------------------- boot
+function boot(){
+  indexFootnotes();
+  document.getElementById("kit-commit").textContent = PIPELINE.kitCommit;
+  document.getElementById("gen-time").textContent = PIPELINE.generated;
+  var sources = (LEDGERS||[]).map(function(l){return l.path + (l.project ? " [" + l.project + "]" : "");}).join(", ") || "(none)";
+  document.getElementById("sources").textContent = sources;
+
+  var wp = document.getElementById("warn-pill");
+  if (PIPELINE.warnings && PIPELINE.warnings.length){
+    wp.style.display = "inline";
+    wp.textContent = PIPELINE.warnings.length + " kit warning(s)";
+    wp.title = PIPELINE.warnings.join("\n");
+  }
+
+  ingest(LEDGERS);
+  renderAll();
+}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+else boot();
+
+})();
+</script>
+</body>
+</html>

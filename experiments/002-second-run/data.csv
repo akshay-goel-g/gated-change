@@ -1,0 +1,3 @@
+arm,change,predicted_tier,reconciled_tier,wall_clock_min,gate_minutes_summed,gates_run,findings_total,findings_before_build,findings_after_build,challenged_premise_count,gate_failures,tests_added,unit_suite_result,e2e_run,interventions
+C,arm-c-auto-resume,T3,T3,25,109,8,4,0,4,3,1,9,2786/2786 green,3/3 passed (verified both ways twice),0
+D,arm-d-grace-period-cleanup,n/a,n/a,5,0,0,0,0,0,0,0,0,2782/2782 green,not applicable (no user-visible surface),0

@@ -1,0 +1,51 @@
+# The evidence for surfaces.conf's declared TARGETs.
+#
+# G5 Proof's card fails a change when "any target has no evidence", and for the
+# whole life of this repo one target had none: "Linux/macOS bash". Every suite
+# run had been Git Bash on Windows (`uname -s` -> MINGW64_NT), there was no CI,
+# and this kit is built almost entirely from awk/sed/grep — where GNU and BSD
+# genuinely diverge. A fresh-context G5 run raised it as blocking; recording it
+# as an accepted risk would not have made the evidence exist.
+#
+# Runs the same `bash tests/run.sh` a developer runs. No matrix cleverness, no
+# caching, no third-party actions beyond checkout: the suite's own header sets a
+# "no dependencies" bar, and a CI file that needs more than the thing it tests is
+# a second install path to keep working.
+name: tests
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    strategy:
+      fail-fast: false        # a macOS-only failure must not hide a Linux one,
+                              # which is the whole reason both are listed
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      # reconcile.sh and tools/lib/coverage.sh both walk
+                              # real history; a shallow clone makes their tests
+                              # pass against a repo that has none
+
+      # Windows runs the suite under Git Bash, which is the TARGET as written
+      # ("Git Bash on Windows"), not WSL and not MSYS generally.
+      - name: Run the suite
+        shell: bash
+        run: |
+          echo "platform: $(uname -s)"
+          echo "bash: $BASH_VERSION"
+          bash tests/run.sh
+
+      # The kit must agree with itself: cards, router matrix and the loop
+      # diagrams. Cheap, and it has caught real drift that survived four commits.
+      - name: Kit self-consistency
+        shell: bash
+        run: bash tools/dashboard.sh --check
