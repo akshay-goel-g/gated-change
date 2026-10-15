@@ -6,7 +6,17 @@
   "author": {
     "name": "Akshey Goel"
   },
+  "homepage": "https://github.com/akshay-goel-g/gated-change",
   "repository": "https://github.com/akshay-goel-g/gated-change",
   "license": "PolyForm-Shield-1.0.0",
-  "keywords": ["code-review", "review-gates", "risk-tiers", "ledger", "ai-assisted-development"]
+  "keywords": [
+    "code-review",
+    "review-gates",
+    "risk-tiers",
+    "ledger",
+    "ai-assisted-development"
+  ],
+  "documentationUrl": "https://github.com/akshay-goel-g/gated-change/blob/master/plugin/README.md",
+  "supportUrl": "https://github.com/akshay-goel-g/gated-change/issues",
+  "privacyPolicyUrl": "https://github.com/akshay-goel-g/gated-change/blob/master/PRIVACY.md"
 }
