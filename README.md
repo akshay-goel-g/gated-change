@@ -1256,6 +1256,11 @@ Named rather than implied:
   rules rate T1 stays T1. `BASE=<last-release>` narrows this; it does not close it.
 - **A gate is only as good as its reviewer.** The kit makes sure a review is *required and
   recorded*; the quality of the review is the model's or the human's.
+- **macOS is not fully green.** On GitHub's macOS runner the suite passes 1383 and fails 25 (12
+  distinct tests, mostly the gate-matrix reader's refusal cases, plus a few in `compliance`,
+  commit resolution and the hook). Linux and Windows (Git Bash) pass. Whether each macOS failure is
+  a test artifact or a real BSD-tool difference has not been established, so treat macOS as
+  unverified until it is.
 
 ---
 

@@ -1,5 +1,10 @@
 *.sh text eol=lf
-templates/pre-push text eol=lf
+# No leading directory: the rule must also match plugin/kit/templates/pre-push, the generated copy,
+# or a Windows checkout lands it as CRLF and the copy no longer equals its source.
+pre-push text eol=lf
+matrix.lock text eol=lf
+LICENSE text eol=lf
+NOTICE text eol=lf
 # VERSION was the one tracked extensionless file with no eol rule, so a Windows
 # checkout with core.autocrlf=true landed it as CRLF. Every tool that reads it
 # strips \r defensively, but the test that asserts <removed-packer> uses it did not
