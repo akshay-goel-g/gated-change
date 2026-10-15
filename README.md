@@ -1258,6 +1258,5 @@ you build it. The legal text decides, not this paragraph.
 repository.
 
 **AI assistance.** Parts of the code, tests and documentation were written with the help of AI
-coding agents under the author's direction. The author claims copyright in the work as a whole
-and takes responsibility for it.
+coding agents under the author's direction.
 
