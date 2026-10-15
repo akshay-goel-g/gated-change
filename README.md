@@ -48,8 +48,8 @@ replacement for CI. See [What it is not](#what-it-is-not).
 | **Used on real projects** | Nine built with it, one of them public: [Focus Guard — Website Blocker](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) on the Chrome Web Store. Use, not a proven effect: see [the evidence](docs/evidence.md) |
 | **Nothing to host** | A folder of markdown, a few bash scripts and one config file. No server, no account, no dependencies beyond `bash` and `git`. Nothing leaves your machine |
 
-What is **not** claimed: that it reduces defects or review effort. That is unproven, and the
-[evidence page](docs/evidence.md) says exactly what the numbers can and cannot support.
+What is **not** claimed: that it reduces defects or review effort. That comparison has not been
+run yet; the [evidence page](docs/evidence.md) says exactly what the numbers can and cannot support.
 
 ### See it
 
@@ -59,8 +59,9 @@ authentication or a migration cannot reach release without a security review on 
 ![Which gates each tier requires](docs/images/tiers-gates.svg)
 
 **The dashboard** is a single HTML file generated from the ledger: open it by double-click,
-no server. This is a real change from this repo's own ledger: a trust-boundary (T4) change that
-every mandated reviewer passed at round 1.
+no server. This is a real change from this repo's own ledger: a trust-boundary (T4) security fix to
+the router's integrity check, which every mandated reviewer passed at round 1. (This is the
+single-change view; load the full ledger to see the project-level metrics panel as well.)
 
 ![The dashboard overview for one change: every reviewer passed at round 1](docs/images/dashboard.png)
 
@@ -145,8 +146,8 @@ Who this is for is under [At a glance](#at-a-glance).
   records that they did. It does not find bugs by itself — the gates (an AI or a human
   following a checklist) do.
 - **Not a service.** Nothing leaves your machine. The ledger is a text file in your repo.
-- **Not proven to reduce defects yet.** See [Status](#status--what-is-and-is-not-proven) —
-  the repo ships a benchmark harness precisely so you can check for yourself.
+- **Not a guarantee.** What is and is not shown is in [Status](#status--what-is-and-is-not-proven);
+  the repo ships a benchmark harness so you can check on your own project.
 
 ---
 
@@ -181,11 +182,8 @@ project/   yours. Every project-specific fact lives here and nowhere else.
 If you find yourself editing `core/` to fit your project, that is a bug in `core/` — the
 knob you need is missing from `project/`. Open an issue rather than forking.
 
-This split exists because the first version of this pipeline was written inside the
-codebase it was designed for. Every rule came out entangled with that project's specifics —
-storage keys, rule engine, browser targets — and separating them afterwards was harder than
-writing them apart in the first place. It is also what lets you
-[update the kit](#updating-an-installed-kit) without losing your configuration.
+This split is what lets you [update the kit](#updating-an-installed-kit) without losing your
+configuration.
 
 ### Five kinds of thing
 
@@ -221,7 +219,7 @@ gate history as yours.
 cp -r gated-change/ your-project/.pipeline/
 cd your-project/.pipeline
 rm -rf .git ledger.jsonl dashboard.html security-reports project \
-       SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist releases tests experiments \
+       SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist tests experiments \
        specs docs .claude .github
 cd ..
 ```
@@ -234,7 +232,8 @@ cd ..
 - `ledger.jsonl`, `dashboard.html`, `security-reports/`, `project/`, `SESSION-HANDOFF.md`,
   `INTENT-LOG.md`, `LEARNINGS.md`, `specs/`, `experiments/`, `tests/`, `docs/` are the kit's own
   development artifacts, not portable content (`docs/` holds this README's images and the evidence page).
-- `dist/` and `releases/` are build output from the kit's own development — dead weight in an install.
+- `dist/` is build output from the kit's own development, and `.claude/` and `.github/` are the kit's
+  own editor settings and CI: dead weight in an install.
 - **Keep** `CHANGELOG.md` and `VERSION`: they travel with a real install, and
   `tools/update-kit.sh` treats them as portable.
 - **Keep** `LICENSE`, `NOTICE` and `examples/`. The license and notice travel with the copy, and `examples/` is
@@ -493,7 +492,7 @@ one loses the record.
 Copy the first three from `templates/` into your docs folder:
 
 ```bash
-cp .pipeline/templates/SESSION-HANDOFF.md .pipeline/templates/INTENT-LOG.md \
+mkdir -p docs && cp .pipeline/templates/SESSION-HANDOFF.md .pipeline/templates/INTENT-LOG.md \
    .pipeline/templates/LEARNINGS.md docs/
 ```
 
@@ -1174,20 +1173,20 @@ the matrix) → the card for whichever gate you are about to run.
 
 ## Status — what is and is not proven
 
-Honest, so no claim outruns its evidence:
+Each claim below is paired with the evidence for it:
 
 | Claim | Status |
 |---|---|
 | The universal couplings are real failure modes | Widely documented, low controversy |
 | The mining method finds real couplings | **Verify on your own repo — that is step 2** |
-| The routed pipeline reduces defects | **Unproven.** `tools/benchmark/` exists to test it |
-| The routing reduces effort vs. reviewing everything | **Unproven.** Same harness |
+| The gates and tiers surface real defects before push | **Shown in this repo's ledger:** 214 blocking findings across 481 gate runs ([numbers and limits](docs/evidence.md)) |
+| Fewer defects reach users | **Not yet measured.** There is no control group; `tools/benchmark/` runs the comparison on your own repo |
+| Routing costs less than reviewing everything | **Cost per gate is measured; the comparison against running every gate has not been run yet** |
 | The kit runs its own pipeline | **Since 2026-08-12.** `ledger.jsonl` is the evidence — 481 gate runs across 50 changes as of 2026-10-15 ([numbers and limits](docs/evidence.md)) |
 | The kit has shipped real projects | **Yes: nine.** One is public — [Focus Guard on the Chrome Web Store](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) — and eight are private. Use is shown; effect on defects or effort is not (rows above) |
 | The tools do what this README says | `bash tests/run.sh` — 1380 checks passed on 2026-10-15, no dependencies |
 
-The benchmark harness is not marketing. If it shows the pipeline costs more than it saves,
-that result gets published here too.
+If the benchmark shows the pipeline costs more than it saves, that result gets published here too.
 
 **On the fifth row.** For its first seventeen commits this repo had no ledger, no hook, and
 somebody else's surfaces file — while shipping a pipeline whose own rule is *a gate with no
@@ -1252,7 +1251,8 @@ as a practical substitute for the software definitely competes. In plain terms: 
 offering your own review pipeline, gating tool or ledger product that does what the kit does is
 the thing to avoid. Using the kit to review and ship your own application is the intended use.
 A developer tool that is itself a gating or review product sits close to the line, so ask before
-you build it. The legal text decides, not this paragraph.
+you build it. Using the kit inside any application or internal workflow is unaffected. The legal
+text decides, not this paragraph.
 
 **Asking about a use that is not covered**, or a commercial arrangement: open an issue on the
 repository.
