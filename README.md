@@ -57,11 +57,32 @@ authentication or a migration cannot reach release without a security review on 
 
 ![Which gates each tier requires](docs/images/tiers-gates.svg)
 
-**The dashboard** is a single HTML file generated from the ledger: open it by double-click, no
-server. This is one real change from this repo's own ledger: it failed at round 1, was fixed,
-and passed at round 2, with each reviewer's verdict.
+**The dashboard** is a single HTML file generated from the ledger: open it by double-click,
+no server. This is a real change from this repo's own ledger: a trust-boundary (T4) change that
+every mandated reviewer passed at round 1.
 
-![The dashboard for one change: a failed first round, then a pass](docs/images/dashboard.png)
+![The dashboard overview for one change: every reviewer passed at round 1](docs/images/dashboard.png)
+
+**The technical page** shows the same change as a graph. It starts at triage, runs the gates
+the tier requires (green is a recorded pass, grey is "not required at this tier"), and each
+box is backed by a line in the ledger, not by anyone's say-so.
+
+![The technical details page: the gate graph for the same change, all required gates passed](docs/images/dashboard-technical.png)
+
+A change that fails shows up red, and stays red until a later pass is recorded against it, so
+the dashboard cannot be tidied into looking healthier than the ledger.
+
+### Built with it
+
+- **[Focus Guard — Website Blocker](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge)**,
+  a public Chrome extension on the Chrome Web Store, was built with this pipeline, per the author.
+- **Eight other projects, all private**, were built with it as well, per the author. Their
+  ledgers are not part of this repository, so the numbers on this page are from this kit's own
+  ledger only.
+
+The extension is a public result you can inspect. The review records behind it are not
+published here, so treat it as a worked example of the kind of project this suits, not as
+evidence of the effect. [What the numbers can and cannot show](docs/evidence.md).
 
 **The gates found real problems** while this kit was being built with itself. It does not show
 what would have escaped without them; read [the limits](docs/evidence.md) before quoting it.
@@ -198,7 +219,7 @@ cp -r gated-change/ your-project/.pipeline/
 cd your-project/.pipeline
 rm -rf .git ledger.jsonl dashboard.html security-reports project \
        SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist releases tests experiments \
-       specs .claude .github
+       specs docs .claude .github
 cd ..
 ```
 
