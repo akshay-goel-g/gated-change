@@ -325,19 +325,24 @@ Things the hook also does, so none of them surprises you on your first push:
   push"**, including trust-boundary commits that predate the kit (`status.sh` leaves those out on
   purpose). Expect it to block until a report in `security-reports/` names the tip you are pushing,
   or log the exception and use `--no-verify`.
+
+<details>
+<summary>Two more hook edge cases: force pushes, and a pin file that gives no cutoff</summary>
+
 - **A force push is checked against what it ADDS, not what it throws away.** A push that does not
   contain the remote's current tip drops those commits, and a trust-boundary fix among them is not
-  considered by the hook (known gap, R-009 (9)): review what a force push discards yourself. A pure
+  considered by the hook (a known gap): review what a force push discards yourself. A pure
   **rollback** (`reset --hard` then `push --force`, so the push adds no commit) can never be satisfied by
-  a report -- every commit a report could name is already on the remote -- and needs `--no-verify`
+  a report, because every commit a report could name is already on the remote. It needs `--no-verify`
   plus the ledger exception line the BLOCKED message prints.
 - **A pin file that gives no cutoff keeps the whole history counted.** While the kit is not committed
   yet, `status.sh` pins the install point in `.pipeline/.install-base`. If that file is empty,
   garbage, a link, or names a commit this clone does not have, it is never rewritten (a rewrite to
   HEAD would hide unrouted work); `status.sh` says so. The way out is `BASELINE=<the install
-  commit>`, or deleting the file to pin again -- at the CURRENT HEAD, so work committed since the
+  commit>`, or deleting the file to pin again, at the CURRENT HEAD, so work committed since the
   install then stops counting.
 
+</details>
 
 ### 5 · Start the ledger and check it is on
 
@@ -369,26 +374,34 @@ the numbers readable.
 - **Commit `.pipeline/` and the ledger.** An uncommitted ledger blocks `git checkout` the
   moment a branch also touches it, and a ledger that is not in git is evidence nobody else can
   see. Commit it with the change it describes.
+- **Work on a branch, not on trunk.** `ledger.sh compliance` ties each gate record to the
+  commits of the change; a pass logged on another branch, or on trunk after your branch point,
+  does not count toward it (one logged AT the branch point itself still does).
+- **Follow-ups on the same change use a higher round:** `ROUND=2 bash .pipeline/tools/reconcile.sh T4 --log`
+  (or `--round 2`). Forgetting this starts a new lineage and the earlier gate results stop counting;
+  the tool refuses that unless you say so with `--restart-lineage`.
+
+<details>
+<summary>More: reading status.sh, merging ledgers, and how lineages restart</summary>
+
 - **Reading `status.sh`:** it counts commits since the last gated commit, or since the kit was installed
   if nothing has been gated. Two branches each gated and then merged are both anchors, so nothing they
   contain is counted. `BASELINE=<ref>` counts from a commit you choose (`BASELINE=none` counts the whole
   history); a ref that names nothing is reported and ignored. If the ledger names gated commits but none is
   reachable from where you are (a squash or rebase merge, or another branch), log a gate on the commit you
   are on to anchor the count.
-- **Work on a branch, not on trunk.** `ledger.sh compliance` ties each gate record to the
-  commits of the change; a pass logged on another branch, or on trunk after your branch point,
-  does not count toward it (one logged AT the branch point itself still does).
 - **Do not union-merge `ledger.jsonl`.** When two branches both log gates, the ledger conflicts
   when you merge; keep both sides' lines in the order they were logged, then run `compliance` and
   re-log any gate whose pass came from the other branch. A union merge hides the conflict and lets
   the verdict follow merge direction. Expect the conflict on every merge of two branches that both
   logged anything (even for different changes): it is the signal, not a malfunction.
-- **Follow-ups on the same change use a higher round:** `ROUND=2 bash .pipeline/tools/reconcile.sh T4 --log`
-  (or `--round 2`). A round-1 reconcile with a different base (for example after a push, when you forgot
-  `ROUND`) would start a **new lineage**: it re-records the base and the tier floor, and every gate result
-  so far stops counting. That is refused unless you say so with `--restart-lineage` (or `RESTART_LINEAGE=1`);
-  re-running the same reconcile with the same base needs nothing. `--restart-lineage` always means
-  round 1: a `--round`/`ROUND` given with it is ignored, with a note.
+- **Restarting a lineage.** A round-1 reconcile with a different base (for example after a push, when
+  you forgot `ROUND`) re-records the base and the tier floor, and every gate result so far stops counting.
+  That is refused unless you pass `--restart-lineage` (or `RESTART_LINEAGE=1`); re-running the same
+  reconcile with the same base needs nothing. `--restart-lineage` always means round 1: a
+  `--round`/`ROUND` given with it is ignored, with a note.
+
+</details>
 
 **You are done.** The ledger stays empty until the first gate runs — which is how you will
 know whether the pipeline is real.
@@ -543,10 +556,8 @@ Only the second can tell you a change is not ready. A logged `skipped` is the ab
 verdict when nothing passed; once a gate has passed, a later `skipped` only records an exception
 (for instance the pre-push override) and does not revoke that pass, while a later `fail` does
 -- and a `skipped` logged after that fail does not hide it. The dashboard follows the same rule
-but has no git, so it cannot mark a pass as outside the change's commits or apply the tier floor,
-and it does not apply `compliance`'s recorded-reason check at T3/T4 (a change whose gates all passed
-but whose current lineage has no recorded reason reads "Success" there and is refused by
-`compliance`); `compliance` is the authority.
+but has no git, so it cannot apply the tier floor or compliance's recorded-reason check at T3/T4:
+where the dashboard and `compliance` differ, `compliance` is the authority.
 
 ### Per-change checklist
 
@@ -588,16 +599,27 @@ bash .pipeline/tools/reconcile.sh --action prod-deploy --evidence "https://ci.ex
 **This is a declaration, not a sensor** — nothing detects the event, and nothing forces you to
 declare it. Evidence is checked for presence, not content.
 
-Each firing is its own event: once a change has fired a declared action, every later firing on it (the same
-action or another) is recorded as round 1 (`ROUND=` is ignored) and starts its own lineage: gates logged for the previous firing no longer count for
-this one, so run and log the mandated gates again (a second deploy of unreviewed code must not inherit the
-first one's passes). Order matters for a repeat: fire first, then run and log the gates; gates logged before
-the firing belong to the previous event. The FIRST firing on a change that so far has only diff routes is a
-follow-up of that work and keeps the round it is given; on a change with no route at all it is recorded as
-round 1 (`ROUND=` is ignored, with a note). A later firing always restarts the lineage, whatever routes the
-change already has, provided the route carries a base (`reconcile.sh --log` sends one whenever git finds a merge-base; a hand-typed
-`ledger.sh route` without `--base` is advisory and cannot start a lineage or move the tier floor). At T3/T4 `compliance` also wants a recorded reason:
-give `REASON="<why>"` on the `--action` run, or log a round-1 G1 note.
+Each firing is its own event:
+
+- A second firing on a change starts its own lineage (it is recorded as round 1; `ROUND=` is ignored).
+  Gates logged for the previous firing no longer count, so run and log the mandated gates again: a
+  second deploy of unreviewed code must not inherit the first one's passes.
+- Order matters for a repeat: fire first, then run and log the gates; gates logged before the firing
+  belong to the previous event.
+- At T3/T4, `compliance` also wants a recorded reason: give `REASON="<why>"` on the `--action` run, or
+  log a round-1 G1 note.
+
+<details>
+<summary>Exact lineage rules for a first firing and for hand-typed routes</summary>
+
+The FIRST firing on a change that so far has only diff routes is a follow-up of that work and keeps
+the round it is given; on a change with no route at all it is recorded as round 1 (`ROUND=` is
+ignored, with a note). A later firing always restarts the lineage, whatever routes the change
+already has, provided the route carries a base (`reconcile.sh --log` sends one whenever git finds a
+merge-base; a hand-typed `ledger.sh route` without `--base` is advisory and cannot start a lineage or
+move the tier floor).
+
+</details>
 
 ### Release-time drift check
 
@@ -1107,8 +1129,7 @@ If it blocks on files that are
 
 **Does it work in a monorepo?**
 Routing is path-based, so anchor your regexes to the sub-project (`(^|/)services/billing/`).
-The kit has not been benchmarked on monorepos specifically; `dashboard.sh --project` can
-combine several ledgers if you run one `.pipeline/` per package.
+Run one `.pipeline/` per package and combine their ledgers with `dashboard.sh --project`.
 
 **Does it work on Windows?**
 Yes, under Git Bash or WSL. The scripts are plain bash and need only `git`.
@@ -1191,7 +1212,7 @@ If the benchmark shows the pipeline costs more than it saves, that result gets p
 **On the fifth row.** For its first seventeen commits this repo had no ledger, no hook, and
 somebody else's surfaces file — while shipping a pipeline whose own rule is *a gate with no
 ledger entry did not run*. By its own standard it had run none. It now has all four records, its
-own `surfaces.conf`, and the hook installed, and it has run its own gates through a dozen
+own `surfaces.conf`, and the hook installed, and it has run its own gates through 50
 changes — most recently a T4 change where every mandated gate passed at round 1. Sub-T2 commits
 since then are ungated because the router mandates no gate for them, which `status.sh` will
 tell you.
@@ -1258,5 +1279,5 @@ text decides, not this paragraph.
 repository.
 
 **AI assistance.** Parts of the code, tests and documentation were written with the help of AI
-coding agents under the author's direction.
+coding agents; the author directed and reviewed the work.
 
