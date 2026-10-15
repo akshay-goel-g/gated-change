@@ -57,17 +57,19 @@ newrepo() { # newrepo <name> — prints the path
   printf '%s' "$r"
 }
 
-# Only what the install flow needs; anything else is denied rather than prompted for.
-ALLOWED=( "Read" "Edit" "Write"
-          "Bash(git *)" "Bash(cp *)" "Bash(mkdir *)" "Bash(touch *)" "Bash(test *)"
-          "Bash(rm -f .pipeline/.built-by-build-plugin)" "Bash(ls *)" "Bash(cat *)"
-          "Bash(echo *)" "Bash(pwd)" "Bash(cd *)" "Bash(find *)" "Bash(wc *)"
-          "Bash(bash .pipeline/tools/status.sh*)" "Bash(bash .pipeline/tools/*)" )
+# Bash is allowed as a whole: a per-command list cannot match the skill's own compound commands
+# (a subshell with && and ||), and dontAsk then refuses the entire call. The run happens in a
+# scratch repository, and the clearly dangerous things are denied by name below.
+ALLOWED=( "Read" "Edit" "Write" "Bash" )
+DENIED=( "Bash(curl *)" "Bash(wget *)" "Bash(ssh *)" "Bash(scp *)" "Bash(sudo *)" "Bash(nc *)"
+         "Bash(git push *)" "Bash(git remote *)" "Bash(rm -rf /*)" "Bash(rm -rf ~*)" "Bash(rm -rf ..*)"
+         "Bash(npm *)" "Bash(pip *)" "Bash(gh *)" )
 
 run_agent() { # run_agent <dir> <prompt> — leaves the JSON in $TMP/last.json, returns claude's exit code
   local dir="$1" prompt="$2"
   local args=( -p "$prompt" --plugin-dir "$PLUGIN" --output-format json
                --permission-mode dontAsk --allowedTools "${ALLOWED[@]}"
+               --disallowedTools "${DENIED[@]}"
                --max-turns "$TURNS" --max-budget-usd "$BUDGET" --no-session-persistence )
   [ -n "$MODEL" ] && args+=( --model "$MODEL" )
   ( cd "$dir" && timeout 900 claude "${args[@]}" ) > "$TMP/last.json" 2> "$TMP/last.err"
