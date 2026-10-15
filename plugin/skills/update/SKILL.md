@@ -1,7 +1,6 @@
 ---
 name: update
 description: Update an installed .pipeline/ kit to the version shipped in this plugin, without touching the project's own config, ledger or reports. Use after the plugin itself has been updated.
-disable-model-invocation: true
 ---
 
 # Update the installed kit
@@ -10,7 +9,7 @@ This refreshes `.pipeline/core`, `tools` and `templates` from the copy inside th
 (`${CLAUDE_PLUGIN_ROOT}/kit`). It leaves `project/`, `ledger.jsonl`, `security-reports/`,
 `dashboard.html` and `.install-base` untouched.
 
-Always preview first, from the project root:
+Never run the real update without the user's yes. Always preview first, from the project root:
 
 ```bash
 bash .pipeline/tools/update-kit.sh "${CLAUDE_PLUGIN_ROOT}/kit" --dry-run

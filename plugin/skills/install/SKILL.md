@@ -1,7 +1,6 @@
 ---
 name: install
 description: Install the gated-change kit into the current git repository as .pipeline/, then walk through the five setup questions. Use when the user wants to set up gated-change in a project.
-disable-model-invocation: true
 ---
 
 # Install gated-change into this repository
@@ -26,7 +25,9 @@ test -e .pipeline && echo "EXISTS" || echo "absent"
 
 ## 2. Say what will be written, then ask
 
-Tell the user plainly what the next steps do, and wait for a yes before step 3:
+This skill may be started from a plain request such as "install the pipeline kit". Whatever started it,
+**do not copy or write anything until the user has said yes to this step.** Tell them plainly what the next
+steps do, then wait:
 
 - Copies the kit to `.pipeline/` (about 70 files).
 - Creates `.pipeline/project/` from the templates and an empty `.pipeline/ledger.jsonl`.
