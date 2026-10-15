@@ -45,6 +45,7 @@ replacement for CI. See [What it is not](#what-it-is-not).
 | **A memory of what already broke you** | A **coupling registry**, mined from your own git history, is handed to the reviewer, so the same two files do not break together a third time |
 | **"Ready" is a computed answer** | `compliance` reads an **append-only ledger** and refuses to call a change ready unless the mandated gates actually ran. A fail stays on record until a later pass clears it |
 | **Review cost you can see** | Tokens and findings per gate, so an expensive gate can be given a cheaper model and one that has stopped finding anything can be retired |
+| **Used on real projects** | Nine built with it, one of them public: [Focus Guard — Website Blocker](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) on the Chrome Web Store. Use, not a proven effect: see [the evidence](docs/evidence.md) |
 | **Nothing to host** | A folder of markdown, a few bash scripts and one config file. No server, no account, no dependencies beyond `bash` and `git`. Nothing leaves your machine |
 
 What is **not** claimed: that it reduces defects or review effort. That is unproven, and the
@@ -72,17 +73,19 @@ box is backed by a line in the ledger, not by anyone's say-so.
 A change that fails shows up red, and stays red until a later pass is recorded against it, so
 the dashboard cannot be tidied into looking healthier than the ledger.
 
-### Built with it
+### Built with it, and the evidence
 
-- **[Focus Guard — Website Blocker](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge)**,
-  a public Chrome extension on the Chrome Web Store, was built with this pipeline, per the author.
-- **Eight other projects, all private**, were built with it as well, per the author. Their
-  ledgers are not part of this repository, so the numbers on this page are from this kit's own
-  ledger only.
+Nine real projects have been built with this pipeline: one public, eight private.
 
-The extension is a public result you can inspect. The review records behind it are not
-published here, so treat it as a worked example of the kind of project this suits, not as
-evidence of the effect. [What the numbers can and cannot show](docs/evidence.md).
+| Project | Visibility | Evidence |
+|---|---|---|
+| **Focus Guard — Website Blocker**, a Chrome extension | Public | [Published on the Chrome Web Store](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) — you can install it and inspect it |
+| Eight other projects | Private | Not linkable. Their ledgers are not in this repository |
+
+The Web Store listing is the public evidence that the pipeline was used to ship a real
+product. It is evidence of use, not of effect: it does not show how many defects were
+prevented. For what the recorded review numbers can and cannot support, read
+[the evidence page](docs/evidence.md).
 
 **The gates found real problems** while this kit was being built with itself. It does not show
 what would have escaped without them; read [the limits](docs/evidence.md) before quoting it.
@@ -1180,6 +1183,7 @@ Honest, so no claim outruns its evidence:
 | The routed pipeline reduces defects | **Unproven.** `tools/benchmark/` exists to test it |
 | The routing reduces effort vs. reviewing everything | **Unproven.** Same harness |
 | The kit runs its own pipeline | **Since 2026-08-12.** `ledger.jsonl` is the evidence — 481 gate runs across 50 changes as of 2026-10-15 ([numbers and limits](docs/evidence.md)) |
+| The kit has shipped real projects | **Yes: nine.** One is public — [Focus Guard on the Chrome Web Store](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) — and eight are private. Use is shown; effect on defects or effort is not (rows above) |
 | The tools do what this README says | `bash tests/run.sh` — 1380 checks passed on 2026-10-15, no dependencies |
 
 The benchmark harness is not marketing. If it shows the pipeline costs more than it saves,

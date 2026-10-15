@@ -35,6 +35,15 @@ The cost column is why the kit reports tokens per gate: it tells you which revie
 expensive, so you can put a cheaper model on it or retire a gate that has stopped finding
 anything.
 
+## Use beyond this repository
+
+Nine projects have been built with the pipeline: eight private ones and one public one,
+[Focus Guard — Website Blocker](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge), a Chrome extension on the Chrome Web Store.
+The public listing is evidence that the kit was used to ship a real product. The private
+projects' ledgers are not published, so none of the numbers on this page come from them. Treat
+the nine projects as proof of use and the ledger figures above as proof of what the gates
+recorded, and neither as proof that defects went down.
+
 ## What it does not show
 
 - **It does not show fewer defects.** No escape has ever been recorded, but "no escapes"
