@@ -61,7 +61,8 @@ newrepo() { # newrepo <name> — prints the path
 ALLOWED=( "Read" "Edit" "Write"
           "Bash(git *)" "Bash(cp *)" "Bash(mkdir *)" "Bash(touch *)" "Bash(test *)"
           "Bash(rm -f .pipeline/.built-by-build-plugin)" "Bash(ls *)" "Bash(cat *)"
-          "Bash(bash .pipeline/tools/status.sh*)" )
+          "Bash(echo *)" "Bash(pwd)" "Bash(cd *)" "Bash(find *)" "Bash(wc *)"
+          "Bash(bash .pipeline/tools/status.sh*)" "Bash(bash .pipeline/tools/*)" )
 
 run_agent() { # run_agent <dir> <prompt> — leaves the JSON in $TMP/last.json, returns claude's exit code
   local dir="$1" prompt="$2"
@@ -81,10 +82,33 @@ except Exception: print("")' "$TMP/last.json"
   else cat "$TMP/last.json"; fi
 }
 
+# On a failed scenario, show what the agent said and which tool calls were refused, so a failure
+# can be told apart: the skill text (it declined or stopped), the permission list (a denial), or
+# the flags (claude itself errored).
+diag() { # diag <scenario>
+  local PY; PY="$(command -v python3 || command -v python || true)"
+  echo "    --- $1: agent output (first 700 chars) ---"
+  result_text | head -c 700 | sed 's/^/    | /'; echo
+  if [ -n "$PY" ]; then
+    "$PY" -c 'import json,sys
+try:
+    d=json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception as e:
+    print("    | (no JSON result: %s)" % e); sys.exit(0)
+den=d.get("permission_denials") or []
+print("    --- %s: %d denied tool call(s) ---" % (sys.argv[2], len(den)))
+for x in den[:8]:
+    print("    | %s %s" % (x.get("tool_name",""), json.dumps(x.get("tool_input",{}))[:160]))
+print("    --- turns=%s cost=$%s subtype=%s ---" % (d.get("num_turns"), d.get("total_cost_usd"), d.get("subtype")))' "$TMP/last.json" "$1"
+  fi
+  [ -s "$TMP/last.err" ] && { echo "    --- stderr ---"; head -c 400 "$TMP/last.err" | sed 's/^/    | /'; echo; }
+}
+
 echo "plugin-agent-e2e — $PLUGIN ${MODEL:+(model $MODEL)}"
 
 # ---------- confirmed ----------------------------------------------------------------------
 echo "1. confirmed: yes to the copy, no to both hooks"
+F0=$FAIL
 R="$(newrepo confirmed)"
 run_agent "$R" "Install the gated-change pipeline kit into this repository using the gated-change install skill.
 I confirm: yes, copy the kit to .pipeline/ and create project/ and the ledger.
@@ -103,9 +127,11 @@ rc=$?
 [ -e "$R/.claude/settings.json" ] && bad "confirmed: .claude/settings.json was written although the user declined" || ok
 result_text | grep -qiE "status|unrouted|never run|ledger|enforcement" && ok \
   || bad "confirmed: the answer does not summarise status.sh"
+[ "$FAIL" -gt "$F0" ] && diag confirmed
 
 # ---------- undecided ----------------------------------------------------------------------
 echo "2. undecided: asked to install, no yes given"
+F0=$FAIL
 R="$(newrepo undecided)"
 run_agent "$R" "Set up the gated-change pipeline kit in this repository. I have not decided yet whether to
 go ahead, so do not copy or change anything. Tell me what you would do and what you need from me."
@@ -115,15 +141,18 @@ rc=$?
 [ -e "$R/.git/hooks/pre-push" ] && bad "undecided: a hook was written without a yes" || ok
 [ -e "$R/.claude" ] && bad "undecided: .claude was created without a yes" || ok
 [ -n "$(git -C "$R" status --porcelain 2>/dev/null)" ] && bad "undecided: the working tree changed" || ok
+[ "$FAIL" -gt "$F0" ] && diag undecided
 
 # ---------- status --------------------------------------------------------------------------
 echo "3. status in a repo with no kit"
+F0=$FAIL
 R="$(newrepo status)"
 run_agent "$R" "Use the gated-change status skill to tell me whether the pipeline is on in this repository."
 rc=$?
 [ "$rc" -eq 0 ] && ok || bad "status: claude exited $rc"
 [ -e "$R/.pipeline" ] && bad "status: status created .pipeline" || ok
 result_text | grep -qiE "install" && ok || bad "status: the answer does not point at the install skill"
+[ "$FAIL" -gt "$F0" ] && diag status
 
 echo
 echo "passed $PASS · failed $FAIL"
