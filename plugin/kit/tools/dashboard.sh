@@ -132,7 +132,7 @@ _matrix_load || { echo "dashboard: gate matrix failed to load — see the 'matri
 # look like, is a card whose author has not decided. Making them REQUIRED is the
 # enforcement — `--check` fails a card that omits one, so the question cannot be
 # skipped by simply not answering it.
-REQUIRED_KEYS="id name persona question owns does_not_own responsible fires trigger input withhold context output passes_when fails_when must_ask overfit_when underfit_when budget escalate_to retire_if"
+CARD_FIELDS="id name persona question owns does_not_own responsible fires trigger input withhold context output passes_when fails_when must_ask overfit_when underfit_when budget escalate_to retire_if"
 
 WARNINGS=""
 warn() { WARNINGS="${WARNINGS}${WARNINGS:+$'\n'}$1"; echo "warning: $1" >&2; }
@@ -302,7 +302,7 @@ while IFS= read -r cf; do
   id=$(printf '%s' "$obj" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
   [ -n "$id" ] || { echo "$cf: no id: key in the yaml block" >&2; exit 1; }
 
-  for k in $REQUIRED_KEYS; do
+  for k in $CARD_FIELDS; do
     printf '%s' "$obj" | grep -q "\"$k\":" || {
       echo "$cf: missing required key '$k'" >&2
       echo "  a card missing a key is a malformed card, not a state with a blank field" >&2
@@ -502,8 +502,8 @@ _relpath() {
       if (out == "") out = "."
       # A leading path SEGMENT containing a colon reads as a URL SCHEME, not as
       # a directory name: a ledger under a directory literally named "https:"
-      # emitted "https:/evil.example.com/ledger.jsonl", and the URL parser
-      # tolerates the single slash and resolves that to https://evil.example.com
+      # emitted "https:/<host>/ledger.jsonl", and the URL parser tolerates the
+      # single slash and resolves that to https://<host>, a remote host
       # — off origin, the same boundary rule 2 above is about. "data:" likewise
       # makes the reference itself the payload. ":" is not a legal filename
       # character on Windows, so this is a POSIX-only shape, but the kit TARGETs

@@ -58,7 +58,7 @@ misses design flaws, because by then the design is built.
 | Secret scan on the diff | A key or token committed to history |
 | Dependency audit | A compromised or vulnerable package |
 | **Permission/capability diff vs last release** | Privilege growing silently — usually the highest-signal security event available |
-| Dangerous-sink grep (`innerHTML`, `eval`, shell interpolation) | Injection surfaces added without escaping |
+| Dangerous-sink grep (`innerHTML`, dynamic code evaluation, shell interpolation) | Injection surfaces added without escaping |
 | Empty-catch grep | Swallowed errors |
 
 Run these in CI or a pre-commit hook. They have no budget because they cost no attention —

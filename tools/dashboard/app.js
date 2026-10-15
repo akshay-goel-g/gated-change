@@ -2697,7 +2697,7 @@ function renderLiveStatus(){
 // legitimate ledger reference and each one leaves the page's own directory:
 //   "//host/x"  — protocol-relative: a DIFFERENT ORIGIN. Reproduced end to end
 //                 against dashboard.sh at c47f380; the page fetched
-//                 http://evil.example.com/ledger.jsonl.
+//                 http://<remote-host>/ledger.jsonl.
 //   "/x"        — the server ROOT. On a host serving several projects' pages
 //                 that is a different project's ledger, rendered under this
 //                 project's name — the confident wrong answer, silently.
