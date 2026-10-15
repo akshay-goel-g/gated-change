@@ -4450,7 +4450,7 @@ test_readme_cleanup_removes_the_kits_own_dev_artifacts_too() {
   ( cd "$scratch/your-project/.pipeline" || exit 1
     eval "$rmcmd" )
   for leaked in .git ledger.jsonl dashboard.html security-reports project \
-      SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist releases tests experiments \
+      SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist releases tests experiments docs \
       .claude .github; do
     [ -e "$scratch/your-project/.pipeline/$leaked" ] \
       && _fail "$leaked survived the README's own cleanup command" || _ok

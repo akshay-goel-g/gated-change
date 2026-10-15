@@ -19,8 +19,60 @@ human reviewing alone.
 
 ---
 
+## At a glance
+
+![One change, start to finish: re-tier from the real diff, run the required gates, record in the ledger, ask compliance](docs/images/flow.svg)
+
+### Who it is for
+
+- **Solo developers and small teams shipping with an AI coding agent** (Claude Code, Cursor,
+  Codex, Copilot, or a human reviewing alone) who want a safety net that does not depend on
+  remembering to be careful.
+- **Projects that have a few things that must not break silently**: authentication, money,
+  migrations, permissions, data retention, a published artifact.
+- **Anyone who wants to measure whether their review process is worth what it costs**, with
+  numbers from their own repo instead of a feeling.
+
+Not a fit if you want a scanner that finds bugs on its own, a hosted service, or a
+replacement for CI. See [What it is not](#what-it-is-not).
+
+### What you get
+
+| Advantage | How, and what you can check |
+|---|---|
+| **The right review for the right change** | The risk tier is recomputed from the **real diff**, not from your plan. In this repo's ledger the real diff disagreed with the plan in 10 of 90 recorded routes, 9 of them under-classified |
+| **Reviewers that do not just agree with the author** | Verify gates run in a **fresh session** that gets the diff, not your explanation. 30% of fresh runs contradicted the author |
+| **A memory of what already broke you** | A **coupling registry**, mined from your own git history, is handed to the reviewer, so the same two files do not break together a third time |
+| **"Ready" is a computed answer** | `compliance` reads an **append-only ledger** and refuses to call a change ready unless the mandated gates actually ran. A fail stays on record until a later pass clears it |
+| **Review cost you can see** | Tokens and findings per gate, so an expensive gate can be given a cheaper model and one that has stopped finding anything can be retired |
+| **Nothing to host** | A folder of markdown, a few bash scripts and one config file. No server, no account, no dependencies beyond `bash` and `git`. Nothing leaves your machine |
+
+What is **not** claimed: that it reduces defects or review effort. That is unproven, and the
+[evidence page](docs/evidence.md) says exactly what the numbers can and cannot support.
+
+### See it
+
+**Ceremony scales with what is at stake.** A CSS tweak asks for almost nothing. A change to
+authentication or a migration cannot reach release without a security review on record.
+
+![Which gates each tier requires](docs/images/tiers-gates.svg)
+
+**The dashboard** is a single HTML file generated from the ledger: open it by double-click, no
+server. This is one real change from this repo's own ledger: it failed at round 1, was fixed,
+and passed at round 2, with each reviewer's verdict.
+
+![The dashboard for one change: a failed first round, then a pass](docs/images/dashboard.png)
+
+**The gates found real problems** while this kit was being built with itself. It does not show
+what would have escaped without them; read [the limits](docs/evidence.md) before quoting it.
+
+![Findings by gate and severity, from this repo's own ledger](docs/images/gate-findings.svg)
+
+---
+
 ## Contents
 
+- [At a glance](#at-a-glance) — who it is for · what you get · screenshots
 - [What problem this solves](#what-problem-this-solves)
 - [How it works](#how-it-works)
 - [Quick start (30 minutes)](#quick-start-30-minutes)
@@ -61,13 +113,7 @@ It scales ceremony with what is at stake. A CSS tweak is a few seconds. A change
 auth code, a database migration or a billing path cannot reach release without a security
 review on record.
 
-### Who it is for
-
-- Solo developers and small teams shipping with an AI agent who want a safety net that
-  does not depend on remembering to be careful.
-- Projects with a few things that **must not break silently** — auth, money, migrations,
-  permissions, data retention, a published artifact.
-- Anyone who wants to *measure* whether their review process is worth its cost.
+Who this is for is under [At a glance](#at-a-glance).
 
 ### What it is not
 
@@ -162,8 +208,8 @@ cd ..
 - `.git` matters most: if `.pipeline` is a repository of its own, the guards that would have
   told you the install was wrong switch off.
 - `ledger.jsonl`, `dashboard.html`, `security-reports/`, `project/`, `SESSION-HANDOFF.md`,
-  `INTENT-LOG.md`, `LEARNINGS.md`, `specs/`, `experiments/`, `tests/` are the kit's own
-  development artifacts, not portable content.
+  `INTENT-LOG.md`, `LEARNINGS.md`, `specs/`, `experiments/`, `tests/`, `docs/` are the kit's own
+  development artifacts, not portable content (`docs/` holds this README's images and the evidence page).
 - `dist/` and `releases/` are build output from the kit's own development — dead weight in an install.
 - **Keep** `CHANGELOG.md` and `VERSION`: they travel with a real install, and
   `tools/update-kit.sh` treats them as portable.
@@ -1112,8 +1158,8 @@ Honest, so no claim outruns its evidence:
 | The mining method finds real couplings | **Verify on your own repo — that is step 2** |
 | The routed pipeline reduces defects | **Unproven.** `tools/benchmark/` exists to test it |
 | The routing reduces effort vs. reviewing everything | **Unproven.** Same harness |
-| The kit runs its own pipeline | **Since 2026-08-12.** `ledger.jsonl` is the evidence — 120+ gate runs across a dozen changes |
-| The tools do what this README says | `bash tests/run.sh` — 877 checks, no dependencies |
+| The kit runs its own pipeline | **Since 2026-08-12.** `ledger.jsonl` is the evidence — 481 gate runs across 50 changes as of 2026-10-15 ([numbers and limits](docs/evidence.md)) |
+| The tools do what this README says | `bash tests/run.sh` — 1380 checks passed on 2026-10-15, no dependencies |
 
 The benchmark harness is not marketing. If it shows the pipeline costs more than it saves,
 that result gets published here too.
@@ -1161,15 +1207,32 @@ Named rather than implied:
 
 ## License
 
-[PolyForm Shield License 1.0.0](LICENSE). This is a source-available license, not an open-source
-one. The `Required Notice:` line in [NOTICE](NOTICE) must travel with every copy.
+**[PolyForm Shield License 1.0.0](LICENSE)**, copyright (C) 2026 Akshey Goel. This is a
+**source-available** license, not an open-source one. The full legal text is in
+[LICENSE](LICENSE) and the copyright notice that must travel with every copy is in
+[NOTICE](NOTICE). The license text is the authority; this section is a summary.
 
-- **Allowed:** use the kit in your own projects, commercial ones included; modify it; copy
-  `.pipeline/` into your repository; share copies, provided the license and `NOTICE` go with them.
-- **Not allowed:** using the kit to make a product that competes with the kit.
-- Using the kit to build your own software is allowed, and your software is not covered by this license.
+| | |
+|---|---|
+| **You may** | use the kit in your own projects, **commercial ones included**; modify it; copy `.pipeline/` into your repositories; share copies |
+| **You must** | pass on the license text and the `Required Notice:` lines in `NOTICE` with any copy you give someone |
+| **You may not** | use the kit, or a copy or modification of it, to provide a **product that competes with it** (the license's "Noncompete" term) |
+| **Your own software** | building your software with the kit does not put your software under this license |
+| **Patents** | the licensor grants you a patent license for the software. If you make a written claim that the software infringes a patent, that license ends |
+| **Warranty** | none. The software is provided as is, and the licensor is not liable for damages from its use |
 
-The license text is the authority here, not this summary. If you are unsure how it applies to
-your case, take advice before you ship.
+**What counts as competing.** The license says goods and services compete even when they use a
+different interface or platform, even when they are free of charge, and that marketing something
+as a practical substitute for the software definitely competes. In plain terms: building and
+offering your own review pipeline, gating tool or ledger product that does what the kit does is
+the thing to avoid. Using the kit to review and ship your own application is the intended use.
+A developer tool that is itself a gating or review product sits close to the line, so ask before
+you build it. The legal text decides, not this paragraph.
 
-*(Working name. Not final.)*
+**Asking about a use that is not covered**, or a commercial arrangement: open an issue on the
+repository, or contact the licensor through the profile linked from it.
+
+**AI assistance.** Parts of the code, tests and documentation were written with the help of AI
+coding agents under the author's direction. The author claims copyright in the work as a whole
+and takes responsibility for it.
+
