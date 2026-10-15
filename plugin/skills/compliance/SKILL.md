@@ -8,7 +8,8 @@ description: Check whether a change is ready by asking the ledger whether the ga
 Readiness is computed from the ledger, not decided by anyone's say-so.
 
 From the project root, ask for the tier and round of the change (they are in the ledger's last
-`route` line for it), then run:
+`route` line for it). Use the tier only if it is exactly `T0` to `T4` and the round only if it is a
+whole number; otherwise stop and ask. Then run:
 
 ```bash
 bash .pipeline/tools/ledger.sh compliance --tier <T0-T4> --round <N>

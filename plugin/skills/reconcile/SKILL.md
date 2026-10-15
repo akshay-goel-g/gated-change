@@ -7,8 +7,8 @@ description: Recompute the risk tier of the current change from the real git dif
 
 The predicted tier is a guess. This recomputes it from what the diff actually touches.
 
-Ask the user for their **predicted tier** (`T0` to `T4`), or read it from their plan. Then, from the
-project root:
+Ask the user for their **predicted tier**, or read it from their plan. Use it only if it is exactly
+`T0`, `T1`, `T2`, `T3` or `T4`; otherwise stop and ask. Then, from the project root:
 
 ```bash
 bash .pipeline/tools/reconcile.sh <predicted-tier>

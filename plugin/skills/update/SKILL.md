@@ -24,6 +24,7 @@ bash .pipeline/tools/update-kit.sh "${CLAUDE_PLUGIN_ROOT}/kit"
 
 Then run `bash .pipeline/tools/status.sh` and report it. The `CHANGELOG.md` in the kit has an
 "Action required" section for each release: read it to the user, because a hook you installed earlier
-is a **copy** and may need re-installing (`bash .pipeline/tools/install-hook.sh --force`).
+is a **copy** and may need re-installing. Re-installing overwrites `.git/hooks/pre-push`
+(`bash .pipeline/tools/install-hook.sh --force`), so ask the user first and say what it replaces.
 
 If `.pipeline/` does not exist, tell the user to run `/gated-change:install`.
