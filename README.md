@@ -1,6 +1,6 @@
 # Gated Change
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+[![License: PolyForm Shield 1.0.0](https://img.shields.io/badge/License-PolyForm%20Shield%201.0.0-blue.svg)](LICENSE)
 ![Dependencies: none](https://img.shields.io/badge/dependencies-bash%20%2B%20git-lightgrey)
 
 **A routed review pipeline for AI-assisted software work.**
@@ -167,7 +167,7 @@ cd ..
 - `dist/` and `releases/` are build output from the kit's own development — dead weight in an install.
 - **Keep** `CHANGELOG.md` and `VERSION`: they travel with a real install, and
   `tools/update-kit.sh` treats them as portable.
-- **Keep** `LICENSE` and `examples/`. The license travels with the copy, and `examples/` is
+- **Keep** `LICENSE`, `NOTICE` and `examples/`. The license and notice travel with the copy, and `examples/` is
   where the ready-made `surfaces.conf` files live.
 - `rsync` users: anchor every pattern with a leading slash — `--exclude '/project/'`, not
   `--exclude 'project/'`, which is unanchored and would also delete `templates/project`, the
@@ -1161,10 +1161,15 @@ Named rather than implied:
 
 ## License
 
-[GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0). You may use, modify and
-distribute the kit; if you distribute a modified version, or run one as a network service,
-the AGPL requires you to make your modified source available under the same terms. The
-license text is the authority here, not this summary — if you are unsure how it applies to
-vendoring the kit inside a proprietary repository, take advice before you ship.
+[PolyForm Shield License 1.0.0](LICENSE). This is a source-available license, not an open-source
+one. The `Required Notice:` line in [NOTICE](NOTICE) must travel with every copy.
+
+- **Allowed:** use the kit in your own projects, commercial ones included; modify it; copy
+  `.pipeline/` into your repository; share copies, provided the license and `NOTICE` go with them.
+- **Not allowed:** using the kit to make a product that competes with the kit.
+- Using the kit to build your own software is allowed, and your software is not covered by this license.
+
+The license text is the authority here, not this summary. If you are unsure how it applies to
+your case, take advice before you ship.
 
 *(Working name. Not final.)*

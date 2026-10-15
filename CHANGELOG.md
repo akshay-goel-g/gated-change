@@ -29,6 +29,12 @@ Compliance and install-path correctness (ACTION-PLAN E1-E11). Reviewed by six fr
 gates over thirteen rounds (no round has yet had all six pass); the findings drove several
 redesigns, recorded in `ledger.jsonl`.
 
+### Changed
+
+- **Relicensed from AGPL-3.0 to PolyForm Shield 1.0.0** (source-available; use in your own
+  projects, no competing product). Basis: no third party held a copy under the AGPL.
+  `LICENSE` is the verbatim 1.0.0 text; `NOTICE` carries the `Required Notice:` line.
+
 ### Fixed
 
 - **One-time text scrub of `ledger.jsonl` for publication (an exception to "append-only; supersede, never edit").**
