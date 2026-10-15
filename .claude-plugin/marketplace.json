@@ -1,0 +1,14 @@
+{
+  "name": "gated-change",
+  "description": "Gated Change: a routed review pipeline for AI-assisted software work.",
+  "owner": {
+    "name": "Akshey Goel"
+  },
+  "plugins": [
+    {
+      "name": "gated-change",
+      "source": "./plugin",
+      "description": "Risk tiers from the real diff, review gates, and an append-only ledger. Installs the kit into your repo as .pipeline/."
+    }
+  ]
+}

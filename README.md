@@ -204,6 +204,24 @@ Only one of them can fail.
 **Requirements:** `bash` (3.2+) and `git`. On Windows use Git Bash or WSL. Your project must
 be a git repository (the router reads `git diff`).
 
+### Install as a Claude Code plugin
+
+If you use Claude Code, you can install the kit from this repository as a plugin instead of
+copying it by hand. The plugin carries the kit and five skills; its install skill does the same
+copy as step 1 and then walks you through step 3.
+
+```bash
+claude plugin marketplace add akshay-goel-g/gated-change
+claude plugin install gated-change@gated-change
+```
+
+Then, inside your project, run `/gated-change:install`. The other skills are
+`/gated-change:status`, `/gated-change:reconcile`, `/gated-change:compliance` and
+`/gated-change:update`. The skills ask before anything that changes files outside `.pipeline/`
+(the git pre-push hook and a reminder hook in `.claude/settings.json`). The plugin is Claude Code
+only; every other agent uses the manual steps that follow. Full description:
+[`plugin/README.md`](plugin/README.md).
+
 ### 1 · Put the kit in your repo
 
 ```bash
@@ -220,7 +238,7 @@ cp -r gated-change/ your-project/.pipeline/
 cd your-project/.pipeline
 rm -rf .git ledger.jsonl dashboard.html security-reports project \
        SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist tests experiments \
-       specs docs .claude .github
+       specs docs plugin .claude-plugin .claude .github
 cd ..
 ```
 
@@ -233,7 +251,8 @@ cd ..
   `INTENT-LOG.md`, `LEARNINGS.md`, `specs/`, `experiments/`, `tests/`, `docs/` are the kit's own
   development artifacts, not portable content (`docs/` holds this README's images and the evidence page).
 - `dist/` is build output from the kit's own development, and `.claude/` and `.github/` are the kit's
-  own editor settings and CI: dead weight in an install.
+  own editor settings and CI: dead weight in an install. `plugin/` and `.claude-plugin/` are the
+  Claude Code plugin packaging of the kit itself (see [Install as a Claude Code plugin](#install-as-a-claude-code-plugin)).
 - **Keep** `CHANGELOG.md` and `VERSION`: they travel with a real install, and
   `tools/update-kit.sh` treats them as portable.
 - **Keep** `LICENSE`, `NOTICE` and `examples/`. The license and notice travel with the copy, and `examples/` is

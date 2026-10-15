@@ -1,0 +1,12 @@
+{
+  "name": "gated-change",
+  "displayName": "Gated Change",
+  "version": "1.0.0",
+  "description": "A routed review pipeline for AI-assisted software work: risk tiers from the real diff, review gates, and an append-only ledger. Bash and git only.",
+  "author": {
+    "name": "Akshey Goel"
+  },
+  "repository": "https://github.com/akshay-goel-g/gated-change",
+  "license": "PolyForm-Shield-1.0.0",
+  "keywords": ["code-review", "review-gates", "risk-tiers", "ledger", "ai-assisted-development"]
+}

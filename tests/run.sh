@@ -4451,7 +4451,7 @@ test_readme_cleanup_removes_the_kits_own_dev_artifacts_too() {
     eval "$rmcmd" )
   for leaked in .git ledger.jsonl dashboard.html security-reports project \
       SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md ACTION-PLAN.md dist releases tests experiments docs \
-      .claude .github; do
+      plugin .claude-plugin .claude .github; do
     [ -e "$scratch/your-project/.pipeline/$leaked" ] \
       && _fail "$leaked survived the README's own cleanup command" || _ok
   done
@@ -4459,6 +4459,31 @@ test_readme_cleanup_removes_the_kits_own_dev_artifacts_too() {
   [ -d "$scratch/your-project/.pipeline/core" ] && _ok || _fail "cleanup deleted core/, which the README never asked for"
   [ -f "$scratch/your-project/.pipeline/CHANGELOG.md" ] && _ok \
     || _fail "CHANGELOG.md should survive -- it travels with a real install (tools/update-kit.sh treats it as portable), not a leak"
+}
+
+# The Claude Code plugin installs a COPY of plugin/. plugin/kit/ is generated from the
+# kit's own sources by tools/build-plugin.sh; a stale copy would ship an old kit under a
+# new version number, and a copy that carried this repo's own ledger or tests would hand
+# every user the project's history. Builds into a scratch directory and compares.
+test_plugin_kit_copy_matches_the_sources_and_leaks_nothing() {
+  local out; out="$(mktemp -d "$TMPROOT/plugin-build.XXXXXX")"
+  cp -R "$KIT/plugin/.claude-plugin" "$out/" 2>/dev/null
+  bash "$KIT/tools/build-plugin.sh" "$out" >/dev/null 2>&1 && _ok || _fail "build-plugin.sh failed"
+  if diff -r "$out/kit" "$KIT/plugin/kit" >/dev/null 2>&1; then _ok
+  else _fail "plugin/kit/ is stale against the sources: run bash tools/build-plugin.sh"; fi
+  local leaked
+  for leaked in ledger.jsonl dashboard.html security-reports project tests experiments specs docs       plugin .claude-plugin .claude .github .git SESSION-HANDOFF.md INTENT-LOG.md LEARNINGS.md       ACTION-PLAN.md dist; do
+    [ -e "$KIT/plugin/kit/$leaked" ] && _fail "$leaked is inside plugin/kit/" || _ok
+  done
+  [ -f "$KIT/plugin/LICENSE" ] && [ -f "$KIT/plugin/NOTICE" ] && _ok     || _fail "the plugin root lacks LICENSE or NOTICE"
+  [ -f "$KIT/plugin/kit/tools/status.sh" ] && [ -f "$KIT/plugin/kit/core/01-router.md" ] && _ok     || _fail "plugin/kit/ is missing the kit's tools or core"
+  grep -q '"name": "gated-change"' "$KIT/plugin/.claude-plugin/plugin.json" && _ok     || _fail "plugin.json does not name the plugin gated-change"
+  grep -q '"source": "./plugin"' "$KIT/.claude-plugin/marketplace.json" && _ok     || _fail "marketplace.json does not point at ./plugin"
+  # Every skill is a folder with a SKILL.md that has a name and a description.
+  local f
+  for f in "$KIT"/plugin/skills/*/SKILL.md; do
+    grep -q '^name: ' "$f" && grep -q '^description: ' "$f" && _ok || _fail "$f lacks name/description"
+  done
 }
 
 # Found by a fresh-context G8 Dogfood run that simply followed the README top to
