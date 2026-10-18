@@ -536,18 +536,26 @@ commit_arg() {
 detect_commit() { git rev-parse --verify -q HEAD 2>/dev/null || printf ''; }
 
 # ---------------------------------------------------------------- add (gate run)
-# citation_ok <file:line[-line]>  --  C1. True when it names a file that exists (relative to the repository
-# root, or absolute) and a line number within it. Presence of a string is not a citation; this is the
-# cheapest check that the thing cited can exist. It cannot tell whether the line is relevant.
+# citation_ok <file:line[-line]>  --  C1. True when it names a file inside this repository (a relative path with no
+# `..`; absolute paths are refused) that exists, and a line number within it. Sets CITE_WHY to the reason when false.
+# Presence of a string is not a citation; this is the cheapest check that the thing cited can exist.
+# It cannot tell whether the line is relevant.
 citation_ok() {
-  local c="$1" f n root
-  case "$c" in *:[0-9]*) ;; *) return 1;; esac
-  f="${c%:*}"; n="${c##*:}"; n="${n%%-*}"
-  case "$n" in ''|*[!0-9]*) return 1;; esac
-  [ -n "$f" ] && [ "$n" -ge 1 ] || return 1
-  case "$f" in /*|[A-Za-z]:*) ;; *) root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"; f="$root/$f";; esac
-  [ -f "$f" ] || return 1
-  [ "$n" -le "$(awk 'END{print NR}' "$f")" ]
+  local c="$1" f n m root
+  CITE_WHY=""
+  case "$c" in *:[0-9]*) ;; *) CITE_WHY="no :line number"; return 1;; esac
+  f="${c%:*}"; n="${c##*:}"
+  case "$c" in *:[0-9]*-*) f="${c%:*}"; n="${c##*:}"; m="${n#*-}"; n="${n%%-*}"
+    case "$m" in ''|*[!0-9]*) CITE_WHY="the range end is not a number"; return 1;; esac
+    [ "${#m}" -le 9 ] && [ "$m" -ge "$n" ] 2>/dev/null || { CITE_WHY="the range is reversed or too large"; return 1; };; esac
+  case "$n" in ''|*[!0-9]*) CITE_WHY="the line is not a number"; return 1;; esac
+  [ "${#n}" -le 9 ] || { CITE_WHY="the line number is too large"; return 1; }
+  [ -n "$f" ] && [ "$n" -ge 1 ] || { CITE_WHY="the line must be 1 or more"; return 1; }
+  case "$f" in /*|[A-Za-z]:*) CITE_WHY="absolute paths are not accepted; cite a path inside the repository"; return 1;;
+               ..|../*|*/..|*/../*) CITE_WHY="a path with .. is not accepted"; return 1;; esac
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+  [ -f "$root/$f" ] || { CITE_WHY="no such file '$f' in the repository"; return 1; }
+  [ "$n" -le "$(awk 'END{print NR}' "$root/$f")" ] || { CITE_WHY="'$f' has fewer than $n lines"; return 1; }
 }
 
 # evidence_run <EVIDENCE::name> <outcome>  --  C1. Looks the name up in project/commands.conf (the `EVIDENCE` kind;
@@ -571,15 +579,25 @@ evidence_run() {
     MANUAL::*|MANUAL) echo "REFUSED: '$key' is a MANUAL line (${cmd#MANUAL::}). A human step is not evidence this tool can run;" >&2
                       echo "  cite it with --evidence file:line instead. Nothing was written to $LEDGER." >&2; return 2;;
   esac
-  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-  # The line that runs must be the one that was reviewed: refuse a commands.conf with uncommitted edits.
-  if git -C "$(dirname "$conf")" rev-parse --git-dir >/dev/null 2>&1 \
-     && git -C "$(dirname "$conf")" ls-files --error-unmatch "$conf" >/dev/null 2>&1 \
-     && ! git -C "$(dirname "$conf")" diff --quiet HEAD -- "$conf" 2>/dev/null; then
-    echo "REFUSED: $conf has uncommitted changes, so the line that would run is not the one anyone reviewed." >&2
-    echo "  Commit it first. Nothing was written to $LEDGER." >&2; return 2
+  # The command runs in the repository the KIT lives in, never in the caller's cwd.
+  root="$(git -C "$KIT_ROOT" rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "REFUSED: $KIT_ROOT is not inside a git repository, so the line that would run cannot be checked against a commit." >&2
+    echo "  Nothing was written to $LEDGER." >&2; return 2; }
+  # The line that runs must be the one that was reviewed: fail CLOSED unless commands.conf is committed in HEAD
+  # and the working copy is the same bytes (compared with CR removed, so an autocrlf checkout is not a change).
+  # `git diff` is not used: skip-worktree and assume-unchanged hide a modified file from it.
+  local _d _pre _committed _working
+  _d="$(dirname "$conf")"
+  _pre="$(git -C "$_d" rev-parse --show-prefix 2>/dev/null)" || _pre="?"
+  _committed="$(git -C "$_d" show "HEAD:${_pre}commands.conf" 2>/dev/null | tr -d '\r')"; rc=$?
+  _working="$(tr -d '\r' < "$conf")"
+  if [ "$_pre" = "?" ] || [ -z "$_committed" ] || [ "$_committed" != "$_working" ]; then
+    echo "REFUSED: $conf is not committed exactly as it is on disk, so the line that would run is not one anyone reviewed." >&2
+    echo "  Commit it first (git add, git commit). Nothing was written to $LEDGER." >&2; return 2
   fi
-  out="$(cd "$root" && bash -c "$cmd" 2>&1 </dev/null)"; rc=$?
+  local _to=""
+  command -v timeout >/dev/null 2>&1 && _to="timeout 600"
+  out="$(cd "$root" && $_to bash -c "$cmd" 2>&1 </dev/null)"; rc=$?
   if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ "$outcome" = "pass" ]; then
     echo "REFUSED: '$key' exited 0 but printed nothing. A command with no output proves nothing (e.g. \`true\`);" >&2
     echo "  make it print what it checked. Nothing was written to $LEDGER." >&2; return 2
@@ -858,7 +876,7 @@ cmd_add() {
   local evidence_json=""
   if [ -n "$evidence" ]; then
     citation_ok "$evidence" || {
-      echo "REFUSED: --evidence '$evidence' is not a file:line citation of a real file and line in this repository." >&2
+      echo "REFUSED: --evidence '$evidence' is not a file:line citation of a real file and line in this repository (${CITE_WHY:-?})." >&2
       echo "  For command output use --evidence-cmd EVIDENCE::<name> (declared in project/commands.conf)." >&2
       echo "  Nothing was written to $LEDGER." >&2
       exit 2; }
@@ -873,7 +891,7 @@ cmd_add() {
      && [ -z "$evidence_json" ]; then
     local _cited=0 _f _r
     for _f in ${raw_findings[@]+"${raw_findings[@]}"}; do
-      case "$_f" in *::*::*) _r="${_f#*::}"; _r="${_r%%::*}"; citation_ok "$_r" && _cited=1;; esac
+      case "$_f" in info::*::*) _r="${_f#*::}"; _r="${_r%%::*}"; citation_ok "$_r" && _cited=1;; esac
     done
     if [ "$_cited" -eq 0 ]; then
       echo "REFUSED: a fresh ${tier:-untiered} pass with no evidence. Cite what was checked, any one of:" >&2

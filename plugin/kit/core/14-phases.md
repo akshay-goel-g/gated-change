@@ -59,6 +59,7 @@ KIND::TARGET::COMMAND
 | `DEPS` | What must be installed before anything builds |
 | `PACKAGE` | How the artifact for this target is produced |
 | `DEPLOY` | How that artifact is made to RUN, locally, for a human or a gate |
+| `EVIDENCE` | A command a gate may cite as proof: `ledger.sh add ... --evidence-cmd EVIDENCE::<name>`. `TARGET` is a free name. It must exit 0 and print something; the file must be committed when it runs. See `02-gates.md` |
 
 `TARGET` matches a `TARGET::` label in `surfaces.conf` — that is the join, and it is what
 makes the following check mechanical rather than a good intention:

@@ -8189,7 +8189,7 @@ test_c1_an_uncommitted_commands_conf_is_refused() {
   printf 'EVIDENCE::sneaky::echo pwned\n' >> "$REPO/.pipeline/project/commands.conf"
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
   assert_exit 2
-  assert_contains "uncommitted"
+  assert_contains "not committed"
 }
 
 test_c1_skipped_and_na_outcomes_need_no_citation() {
@@ -8207,6 +8207,69 @@ test_c1_evidence_key_matches_whole_names_only_and_tolerates_crlf() {
   git -C "$REPO" commit -qam crlf >/dev/null 2>&1
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::crlf
   assert_exit 0 "a CRLF conf line runs"
+}
+
+test_c1_only_an_info_finding_counts_and_citations_stay_inside_the_repo() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome pass --finding "blocking::.pipeline/tools/ledger.sh:3::x"; assert_exit 2 "a blocking finding is not a citation"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "/etc/hosts:1";                              assert_exit 2; assert_contains "absolute"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "../x:1";                                    assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:5-2";             assert_exit 2 "reversed range"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:3-zz";            assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:99999999999999999999"; assert_exit 2
+}
+
+test_c1_an_untracked_or_skip_worktree_commands_conf_is_refused() {
+  newrepo
+  c1_conf 'EVIDENCE::ok::echo hi'
+  git -C "$REPO" update-index --skip-worktree .pipeline/project/commands.conf
+  printf 'EVIDENCE::sneak::echo sneak\n' >> "$REPO/.pipeline/project/commands.conf"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::sneak
+  assert_exit 2 "skip-worktree hides the edit from git diff, not from this check"
+  git -C "$REPO" update-index --no-skip-worktree .pipeline/project/commands.conf
+  git -C "$REPO" checkout -q -- .pipeline/project/commands.conf
+  cp "$REPO/.pipeline/project/commands.conf" "$REPO/commands.keep"
+  git -C "$REPO" rm -q .pipeline/project/commands.conf
+  git -C "$REPO" commit -qm "drop conf" >/dev/null 2>&1
+  mv "$REPO/commands.keep" "$REPO/.pipeline/project/commands.conf"   # now present but never committed
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
+  assert_exit 2 "an untracked conf is not a reviewed conf"
+}
+
+test_c1_an_evidence_command_runs_in_the_kits_repository_not_the_callers_cwd() {
+  newrepo
+  c1_conf 'EVIDENCE::where::pwd'
+  local other; other="$(mktemp -d "$TMPROOT/other.XXXXXX")"; git -C "$other" init -q
+  run bash -c "cd '$other' && LED_NO_EVIDENCE=1 bash '$REPO/.pipeline/tools/ledger.sh' --ledger '$(ledger_path)' add --change c1 --model m --confidence fresh --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::where"
+  assert_exit 0
+  assert_not_contains "$(basename "$other")"
+}
+
+test_c1_the_recorded_hash_covers_the_real_output_and_the_conf_line() {
+  newrepo
+  c1_conf 'EVIDENCE::fixed::printf abc'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::fixed
+  assert_exit 0
+  # sha256("abc")
+  assert_file_contains "$(ledger_path)" '"evidence_sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"'
+  local want; want="$(printf '%s' 'EVIDENCE::fixed::printf abc' | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  assert_file_contains "$(ledger_path)" "\"evidence_line_sha256\":\"$want\""
+}
+
+test_c1_an_evidence_command_sees_the_repository_root_as_its_cwd() {
+  newrepo
+  c1_conf 'EVIDENCE::rel::cat src/app.js'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::rel
+  assert_exit 0 "a relative path in a conf line resolves from the repository root"
+  assert_contains "console.log"
+}
+
+test_c1_a_directory_or_a_line_past_the_end_is_not_a_citation() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools:1"; assert_exit 2 "a directory is not a file"
+  local n; n="$(awk 'END{print NR}' "$REPO/src/app.js")"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "src/app.js:$n";       assert_exit 0 "the last line is citable"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "src/app.js:$((n+1))"; assert_exit 2 "one past the end is not"
 }
 
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {

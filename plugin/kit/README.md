@@ -982,6 +982,8 @@ DEPLOY::iOS::MANUAL::open the build in a simulator; a human has to tap through o
 ```
 
 Format `KIND::TARGET::COMMAND`, where `TARGET` matches a `TARGET::` label in `surfaces.conf`.
+A fourth kind, `EVIDENCE::<name>::<command>`, declares a command a gate may cite as proof
+(`ledger.sh add ... --evidence-cmd EVIDENCE::<name>`; it must exit 0, print something, and the file must be committed).
 Deploy targets a **clean** instance (throwaway profile, temp container, simulator).
 **A `MANUAL` line is a decision; a missing line is an oversight** — they must not look the
 same at Triage.

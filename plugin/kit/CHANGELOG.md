@@ -39,6 +39,10 @@ redesigns, recorded in `ledger.jsonl`.
   still bypasses it (ACTION-PLAN C3). A citation must name an existing file and a line within it; an untiered fresh pass
   is held to the same rule; an `EVIDENCE::` command must print something and `commands.conf` must be committed.
   Existing installs keep their own `project/commands.conf` (no `EVIDENCE::` lines) until they add some.
+  **Action required (existing installs):** `update-kit` does not touch `project/`. To use `--evidence-cmd`, add `EVIDENCE::<name>::<command>`
+  lines to your `project/commands.conf` and commit it; to make that file a T4 surface, add
+  `T4::(^|/)project/commands\.conf$::What a gate may run as evidence` to your `project/surfaces.conf`. `--evidence file:line`
+  and `info` findings work without either. Gate runs of a fresh T3/T4 pass that cite nothing are now refused: update any script that logs one.
 
 ### Changed
 

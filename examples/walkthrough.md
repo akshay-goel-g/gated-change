@@ -139,6 +139,7 @@ Re-run the gates against the new commit and log each one as round 2:
 for g in G1 G4 G5 G6 G7 G8; do
   bash .pipeline/tools/ledger.sh add --change fix-login-redirect --gate $g --tier T4 --round 2 \
     --outcome pass --confidence fresh --challenged true --tokens 5000 \
+    --finding "info::src/auth/login.js:1::redirect target is now checked against an allow-list" \
     --note "Bug fix: users land on a blank page after login"
 done
 ```
