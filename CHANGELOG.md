@@ -29,6 +29,15 @@ Compliance and install-path correctness (ACTION-PLAN E1-E11). Reviewed by six fr
 gates over thirteen rounds (no round has yet had all six pass); the findings drove several
 redesigns, recorded in `ledger.jsonl`.
 
+### Added
+
+- **Gate evidence (ACTION-PLAN C1).** `ledger.sh add` now refuses a *fresh* T3/T4 `pass` that cites nothing. Accepted:
+  a finding with a location (an `info` finding is the form for "checked, holds"), `--evidence file:line`, or
+  `--evidence-cmd EVIDENCE::<name>`, which runs a line declared in `project/commands.conf`, records the exit code, a
+  sha256 of the output and a sha256 of the conf line, and refuses a `pass` when the command fails or the line is `MANUAL`.
+  `project/commands.conf` is now a T4 surface. Write-time only: older lines are not re-judged, and a hand-edited ledger
+  still bypasses it (ACTION-PLAN C3).
+
 ### Changed
 
 - **Relicensed from AGPL-3.0 to PolyForm Shield 1.0.0** (source-available; use in your own

@@ -533,10 +533,44 @@ commit_arg() {
 detect_commit() { git rev-parse --verify -q HEAD 2>/dev/null || printf ''; }
 
 # ---------------------------------------------------------------- add (gate run)
+# evidence_run <EVIDENCE::name> <outcome>  --  C1. Looks the name up in project/commands.conf (the `EVIDENCE` kind;
+# KIND::NAME is the key, never a bare name), refuses a MANUAL line (a human step is not evidence a script can
+# produce), runs the command with `bash -c` from the repository root, and prints the JSON fields to append:
+# the key, exit code, sha256 of the combined output, and sha256 of the conf line that was run (so a later edit
+# to commands.conf is visible). A non-zero exit refuses a `pass`. The command's own output goes to stderr.
+# Trust: this moves trust into commands.conf, it does not remove it -- which is why that file is a T4 surface.
+evidence_run() {
+  local key="$1" outcome="$2" conf line cmd root out rc h lh
+  case "$key" in
+    EVIDENCE::?*) ;;
+    *) echo "REFUSED: --evidence-cmd '$key' is not EVIDENCE::<name>. Nothing was written to $LEDGER." >&2; return 2;;
+  esac
+  conf="$KIT_ROOT/project/commands.conf"
+  [ -f "$conf" ] || { echo "REFUSED: $conf not found. Nothing was written to $LEDGER." >&2; return 2; }
+  line="$(tr -d '\r' < "$conf" | awk -v k="$key::" 'index($0,k)==1 {print; exit}')"
+  [ -n "$line" ] || { echo "REFUSED: no '$key' line in $conf. Nothing was written to $LEDGER." >&2; return 2; }
+  cmd="${line#"$key"::}"
+  case "$cmd" in
+    MANUAL::*|MANUAL) echo "REFUSED: '$key' is a MANUAL line (${cmd#MANUAL::}). A human step is not evidence this tool can run;" >&2
+                      echo "  cite it with --evidence file:line instead. Nothing was written to $LEDGER." >&2; return 2;;
+  esac
+  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+  out="$(cd "$root" && bash -c "$cmd" 2>&1)"; rc=$?
+  h="$(printf '%s' "$out" | _matrix_hash)" && lh="$(printf '%s' "$line" | _matrix_hash)" || {
+    echo "REFUSED: no sha256sum, shasum or openssl found. Nothing was written to $LEDGER." >&2; return 2; }
+  printf '%s\n' "$out" | tail -n 5 | sed 's/^/  evidence> /' >&2
+  if [ "$rc" -ne 0 ] && [ "$outcome" = "pass" ]; then
+    echo "REFUSED: '$key' exited $rc, so it cannot support a pass. Nothing was written to $LEDGER." >&2; return 2
+  fi
+  printf ',"evidence_cmd":"%s","evidence_exit":%s,"evidence_sha256":"%s","evidence_line_sha256":"%s"' \
+    "$(json_escape "$key")" "$rc" "$h" "$lh"
+}
+
 cmd_add() {
   local change="" gate="" tier="" outcome="pass" confidence="" confidence_set=0
   local challenged="false" minutes=0 tokens=0 tokens_set=0 lane="normal" note="" model="${PIPELINE_MODEL:-unset}"
   local round=1 round_set=0 commit="" commit_set=0
+  local evidence="" evidence_cmd=""   # C1: a citation, or a declared EVIDENCE:: command to run (see evidence_run)
   local withhold_breached=""   # unset by default — TRIAL, optional (see --withhold-breached above)
   local tokens_in="" tokens_out="" tokens_in_set=0 tokens_out_set=0   # OPTIONAL, PAIRED (see --tokens-in above)
   # Findings are collected raw and rendered after the loop: the id needs --change,
@@ -557,6 +591,8 @@ cmd_add() {
       --model) _val "$1" "$#" "${2-}"; model="$2"; shift 2;;        --round) _val "$1" "$#" "${2-}"; round="$2"; round_set=1; shift 2;;
       --commit) _val "$1" "$#" "${2-}"; commit="$2"; commit_set=1; shift 2;;
       --withhold-breached) _val "$1" "$#" "${2-}"; withhold_breached="$2"; shift 2;;
+      --evidence) _val "$1" "$#" "${2-}"; evidence="$2"; shift 2;;
+      --evidence-cmd) _val "$1" "$#" "${2-}"; evidence_cmd="$2"; shift 2;;
       --finding)
         _val "$1" "$#" "${2-}"; raw_findings[$n_details]="$2"; n_details=$((n_details + 1)); shift 2;;
       --findings)
@@ -786,6 +822,40 @@ cmd_add() {
 
   commit="$(commit_arg "$commit" "$commit_set")" || exit 2
 
+  # C1: a PASS at T3/T4 must cite something. core/02-gates.md's evidence rule covers agreement as much as
+  # disagreement, but only a finding's `location` was ever checked, so a fresh pass with no findings satisfied
+  # a mandate with no citation at all. Accepted: one finding that carries a location (an `info` finding is the
+  # natural form for "I checked X and it holds"), `--evidence file:line`, or `--evidence-cmd EVIDENCE::<name>`,
+  # a command declared in project/commands.conf that this script runs itself.
+  local evidence_json=""
+  if [ -n "$evidence" ]; then
+    case "$evidence" in
+      *[!\ ]*:[0-9]*) ;;
+      *) echo "REFUSED: --evidence '$evidence' is not a file:line citation. For command output use" >&2
+         echo "  --evidence-cmd EVIDENCE::<name> (declared in project/commands.conf). Nothing was written to $LEDGER." >&2
+         exit 2;;
+    esac
+    evidence_json="$(printf ',"evidence":"%s"' "$(json_escape "$evidence")")"
+  fi
+  if [ -n "$evidence_cmd" ]; then
+    local _ev; _ev="$(evidence_run "$evidence_cmd" "$outcome")" || exit 2
+    evidence_json="${evidence_json}${_ev}"
+  fi
+  if [ "$outcome" = "pass" ] && [ "$confidence" = "fresh" ] && { [ "$tier" = "T3" ] || [ "$tier" = "T4" ]; } \
+     && [ -z "$evidence_json" ]; then
+    local _cited=0 _f _r
+    for _f in ${raw_findings[@]+"${raw_findings[@]}"}; do
+      case "$_f" in *::*::*) _r="${_f#*::}"; _r="${_r%%::*}"; [ -n "$_r" ] && _cited=1;; esac
+    done
+    if [ "$_cited" -eq 0 ]; then
+      echo "REFUSED: a fresh $tier pass with no evidence. Cite what was checked, any one of:" >&2
+      echo "    --finding \"info::file:line::what held\"   --evidence file:line   --evidence-cmd EVIDENCE::<name>" >&2
+      echo "  core/02-gates.md, the evidence rule: agreement needs the same citation as an objection." >&2
+      echo "  Nothing was written to $LEDGER." >&2
+      exit 2
+    fi
+  fi
+
   local details_json=""
   [ "$n_details" -gt 0 ] && details_json="$(printf ',"finding_details":[%s]' "$details")"
 
@@ -827,11 +897,11 @@ cmd_add() {
   # in a BARE, unquoted position in this template (tokens_in/tokens_out inside
   # tokens_split_json) and are validated above rather than escaped here,
   # because escaping only protects a value inside quotes.
-  emit "$(printf '{"type":"gate","date":"%s","change":"%s","tier":"%s","gate":"%s","round":%s,"commit":"%s","kit":"%s","findings":%s%s,"outcome":"%s","confidence":"%s","challenged_premise":%s,"minutes":%s,"tokens":%s,"lane":"%s","model":"%s","note":"%s"%s%s}' \
+  emit "$(printf '{"type":"gate","date":"%s","change":"%s","tier":"%s","gate":"%s","round":%s,"commit":"%s","kit":"%s","findings":%s%s,"outcome":"%s","confidence":"%s","challenged_premise":%s,"minutes":%s,"tokens":%s,"lane":"%s","model":"%s","note":"%s"%s%s%s}' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(json_escape "$change")" "$(json_escape "$tier")" "$(json_escape "$gate")" "$round" \
     "$(json_escape "$commit")" "$(json_escape "$(detect_kit)")" "$findings" "$details_json" \
     "$(json_escape "$outcome")" "$(json_escape "$confidence")" "$challenged" "$minutes" "$tokens" "$(json_escape "$lane")" \
-    "$(json_escape "$model")" "$(json_escape "$note")" "$withhold_json" "$tokens_split_json")" \
+    "$(json_escape "$model")" "$(json_escape "$note")" "$withhold_json" "$tokens_split_json" "$evidence_json")" \
     "logged: $gate ($(gate_name "$gate")) on $change — round $round, $findings finding(s), $outcome"
 
   # core/08-models.md picks a tier per gate and then says "say which you picked".
