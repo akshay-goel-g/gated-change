@@ -275,8 +275,13 @@ rec()  { ( cd "$REPO" && BASE="$BASE_SHA" bash .pipeline/tools/reconcile.sh "$@"
 # with LED_NO_EVIDENCE=1 (the C1 tests do) or supplies its own.
 led()  {
   local _ev=()
-  [ "${1-}" = add ] && [ -z "${LED_NO_EVIDENCE-}" ] && _ev=(--evidence tests/run.sh:1)
-  ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$(ledger_path)" "$@" ${_ev[@]+"${_ev[@]}"} )
+  [ "${1-}" = add ] && [ -z "${LED_NO_EVIDENCE-}" ] && _ev=(--evidence .pipeline/tools/ledger.sh:1)
+  # Injected BEFORE the caller's own arguments, so a test that passes --evidence wins (last flag wins).
+  if [ "${1-}" = add ]; then
+    ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$(ledger_path)" add ${_ev[@]+"${_ev[@]}"} "${@:2}" )
+  else
+    ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$(ledger_path)" "$@" )
+  fi
 }
 
 # `led()` above ALWAYS passes --ledger explicitly, which means every other test
@@ -311,8 +316,12 @@ selfhostrepo() {
 # No --ledger — this is the point.
 led_default() {
   local _ev=()
-  [ "${1-}" = add ] && [ -z "${LED_NO_EVIDENCE-}" ] && _ev=(--evidence tests/run.sh:1)
-  ( cd "$SELFREPO" && bash tools/ledger.sh "$@" ${_ev[@]+"${_ev[@]}"} )
+  [ "${1-}" = add ] && [ -z "${LED_NO_EVIDENCE-}" ] && _ev=(--evidence tools/ledger.sh:1)
+  if [ "${1-}" = add ]; then
+    ( cd "$SELFREPO" && bash tools/ledger.sh add ${_ev[@]+"${_ev[@]}"} "${@:2}" )
+  else
+    ( cd "$SELFREPO" && bash tools/ledger.sh "$@" )
+  fi
 }
 
 # A repo built to exercise the BASE resolution chain, so BASE is deliberately
@@ -3019,7 +3028,7 @@ test_ledger_default_path_success_message_names_the_resolved_path() {
 # The installed shape must not regress while fixing the self-hosting one.
 test_ledger_default_path_is_still_dot_pipeline_when_installed() {
   newrepo
-  ( cd "$REPO" && bash .pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T4 --outcome pass --model m --evidence tests/run.sh:1 ) >/dev/null 2>&1
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T4 --outcome pass --model m --evidence .pipeline/tools/ledger.sh:1 ) >/dev/null 2>&1
   [ -f "$(ledger_path)" ] || _fail "an installed copy (kit nested under .pipeline/ inside a bigger repo) must still default there"
   _ok
 }
@@ -8092,6 +8101,8 @@ test_hook_treats_a_trust_pattern_that_starts_with_a_dash_as_a_pattern() {
 # ================================================================ C1: gate evidence
 # A fresh T3/T4 pass must cite something: an info finding with a location, --evidence file:line, or
 # --evidence-cmd EVIDENCE::<name> from project/commands.conf (ledger.sh evidence_run).
+c1_conf() { printf '%s\n' "$@" >> "$REPO/.pipeline/project/commands.conf"
+            git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "evidence lines" >/dev/null 2>&1; }
 c1_add() { LED_NO_EVIDENCE=1 led add --change c1 --model m --confidence fresh "$@"; }
 
 test_c1_bare_fresh_t4_pass_is_refused_and_writes_nothing() {
@@ -8111,20 +8122,20 @@ test_c1_t2_pass_and_t4_fail_and_low_confidence_need_no_evidence() {
 
 test_c1_info_finding_with_location_satisfies_it_but_one_without_does_not() {
   newrepo
-  run c1_add --gate G4 --tier T3 --outcome pass --finding "info::tools/x.sh:5::held"; assert_exit 0
+  run c1_add --gate G4 --tier T3 --outcome pass --finding "info::.pipeline/tools/ledger.sh:5::held"; assert_exit 0
   run c1_add --gate G4 --tier T3 --outcome pass --finding "info::claim only";          assert_exit 2
 }
 
 test_c1_evidence_flag_must_be_file_line() {
   newrepo
   run c1_add --gate G4 --tier T4 --outcome pass --evidence "looks fine"; assert_exit 2; assert_contains "file:line"
-  run c1_add --gate G4 --tier T4 --outcome pass --evidence "tools/x.sh:5"; assert_exit 0
-  assert_file_contains "$(ledger_path)" '"evidence":"tools/x.sh:5"'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:5"; assert_exit 0
+  assert_file_contains "$(ledger_path)" '"citation":".pipeline/tools/ledger.sh:5"'
 }
 
 test_c1_evidence_cmd_runs_the_declared_line_and_records_exit_and_hashes() {
   newrepo
-  printf 'EVIDENCE::ok::echo hi\n' >> "$REPO/.pipeline/project/commands.conf"
+  c1_conf 'EVIDENCE::ok::echo hi'
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
   assert_exit 0
   assert_file_contains "$(ledger_path)" '"evidence_cmd":"EVIDENCE::ok","evidence_exit":0,"evidence_sha256":"'
@@ -8134,7 +8145,7 @@ test_c1_evidence_cmd_runs_the_declared_line_and_records_exit_and_hashes() {
 
 test_c1_evidence_cmd_refuses_unknown_manual_wrong_kind_and_failing_command() {
   newrepo
-  printf 'EVIDENCE::bad::exit 3\nEVIDENCE::man::MANUAL::a human\n' >> "$REPO/.pipeline/project/commands.conf"
+  c1_conf 'EVIDENCE::bad::exit 3' 'EVIDENCE::man::MANUAL::a human'
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::nope;  assert_exit 2; assert_contains "no 'EVIDENCE::nope' line"
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::man;   assert_exit 2; assert_contains "MANUAL"
   run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd DEPS::default;   assert_exit 2; assert_contains "not EVIDENCE"
@@ -8144,6 +8155,41 @@ test_c1_evidence_cmd_refuses_unknown_manual_wrong_kind_and_failing_command() {
   run c1_add --gate G4 --tier T4 --outcome fail --evidence-cmd EVIDENCE::bad --finding "blocking::a.sh:1::x"
   assert_exit 0
   assert_file_contains "$(ledger_path)" '"evidence_exit":3'
+}
+
+test_c1_an_untiered_fresh_pass_is_held_to_the_same_rule() {
+  newrepo
+  run c1_add --gate G4 --outcome pass
+  assert_exit 2
+  assert_contains "untiered"
+}
+
+test_c1_a_citation_must_name_a_real_file_and_a_line_within_it() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "nonexistent.sh:3";            assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:99999999"; assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:0";  assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "a b:9 x"; assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --finding "info:: ::blank";                assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --finding "info::nofile::x";               assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence ".pipeline/tools/ledger.sh:2-9"; assert_exit 0 "a line range cites its first line"
+}
+
+test_c1_a_command_that_prints_nothing_does_not_support_a_pass() {
+  newrepo
+  c1_conf 'EVIDENCE::silent::true'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::silent
+  assert_exit 2
+  assert_contains "printed nothing"
+}
+
+test_c1_an_uncommitted_commands_conf_is_refused() {
+  newrepo
+  c1_conf 'EVIDENCE::ok::echo hi'
+  printf 'EVIDENCE::sneaky::echo pwned\n' >> "$REPO/.pipeline/project/commands.conf"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
+  assert_exit 2
+  assert_contains "uncommitted"
 }
 
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {

@@ -37,6 +37,7 @@ severities:   blocking | minor | info | out-of-scope   # 04-ledger.md
 logs_with:    ledger.sh add --change <name> --gate G4 --tier <T> --round <n> --outcome pass|fail
               --confidence fresh|low --challenged true|false --model <name> --tokens <n>
               --finding "<severity>::<file:line>::<claim>"      # 02-gates.md "Running a gate"
+              [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>]   # a fresh T3/T4 pass must cite: an info --finding with a real file:line, or one of these
               [--withhold-breached true|false]      # optional, trial — core/11-evolution.md Step 7
               [--tokens-in <n> --tokens-out <n>]    # optional, paired — 04-ledger.md; computes --tokens
 escalate_to:  T4 approver when the change cannot ship independently

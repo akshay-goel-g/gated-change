@@ -36,7 +36,9 @@ redesigns, recorded in `ledger.jsonl`.
   `--evidence-cmd EVIDENCE::<name>`, which runs a line declared in `project/commands.conf`, records the exit code, a
   sha256 of the output and a sha256 of the conf line, and refuses a `pass` when the command fails or the line is `MANUAL`.
   `project/commands.conf` is now a T4 surface. Write-time only: older lines are not re-judged, and a hand-edited ledger
-  still bypasses it (ACTION-PLAN C3).
+  still bypasses it (ACTION-PLAN C3). A citation must name an existing file and a line within it; an untiered fresh pass
+  is held to the same rule; an `EVIDENCE::` command must print something and `commands.conf` must be committed.
+  Existing installs keep their own `project/commands.conf` (no `EVIDENCE::` lines) until they add some.
 
 ### Changed
 

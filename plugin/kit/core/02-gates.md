@@ -112,6 +112,9 @@ to find it.
 5. Log it:  ledger.sh add --change <name> --gate G_ --outcome pass|fail \
               --confidence fresh --challenged true|false --model <name> --tokens <n> \
               --finding "severity::location::claim"        # once per finding
+   A fresh pass at T3/T4 (or with no tier) is refused unless it cites something real: an `info` finding whose
+   location is an existing `file:line`, `--evidence file:line`, or `--evidence-cmd EVIDENCE::<name>` (a line of
+   `project/commands.conf` that `ledger.sh` runs itself; it records the exit code and sha256 hashes).
 ```
 
 **Every card carries that invocation on its `logs_with:` line, its expected model tier on

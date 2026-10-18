@@ -807,7 +807,7 @@ checkout a `BASE` it contains.
 ### `ledger.sh` — record and report
 
 ```bash
-ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>] \
+ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>]                      [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>]   # a fresh T3/T4 pass must cite (see core/02-gates.md) \
                      --confidence fresh|low [--challenged true|false] [--model <name>] \
                      [--tokens N | --tokens-in N --tokens-out N] [--minutes N] \
                      [--lane normal|hotfix] [--note "…"] [--finding "severity::location::claim"]…

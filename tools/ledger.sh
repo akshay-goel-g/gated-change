@@ -9,6 +9,9 @@
 #
 # Usage:
 #   ledger.sh add    --change <name> --gate G7 --tier T4 [options]
+#            A fresh T3/T4 (or untiered) pass must cite something: an `info` --finding whose location is a
+#            real file:line, or [--evidence file:line] or [--evidence-cmd EVIDENCE::<name>] (a line of
+#            project/commands.conf that this script runs, recording exit code and hashes).
 #   ledger.sh route  --change <name> --predicted T1 --actual T4 [--base <sha>] [--restart-lineage]
 #            [--action NAME --evidence '<citation>']   # a declared event, not a diff —
 #            reconcile.sh --action passes both through. Paired: one without the
@@ -533,6 +536,20 @@ commit_arg() {
 detect_commit() { git rev-parse --verify -q HEAD 2>/dev/null || printf ''; }
 
 # ---------------------------------------------------------------- add (gate run)
+# citation_ok <file:line[-line]>  --  C1. True when it names a file that exists (relative to the repository
+# root, or absolute) and a line number within it. Presence of a string is not a citation; this is the
+# cheapest check that the thing cited can exist. It cannot tell whether the line is relevant.
+citation_ok() {
+  local c="$1" f n root
+  case "$c" in *:[0-9]*) ;; *) return 1;; esac
+  f="${c%:*}"; n="${c##*:}"; n="${n%%-*}"
+  case "$n" in ''|*[!0-9]*) return 1;; esac
+  [ -n "$f" ] && [ "$n" -ge 1 ] || return 1
+  case "$f" in /*|[A-Za-z]:*) ;; *) root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"; f="$root/$f";; esac
+  [ -f "$f" ] || return 1
+  [ "$n" -le "$(awk 'END{print NR}' "$f")" ]
+}
+
 # evidence_run <EVIDENCE::name> <outcome>  --  C1. Looks the name up in project/commands.conf (the `EVIDENCE` kind;
 # KIND::NAME is the key, never a bare name), refuses a MANUAL line (a human step is not evidence a script can
 # produce), runs the command with `bash -c` from the repository root, and prints the JSON fields to append:
@@ -555,7 +572,18 @@ evidence_run() {
                       echo "  cite it with --evidence file:line instead. Nothing was written to $LEDGER." >&2; return 2;;
   esac
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
-  out="$(cd "$root" && bash -c "$cmd" 2>&1)"; rc=$?
+  # The line that runs must be the one that was reviewed: refuse a commands.conf with uncommitted edits.
+  if git -C "$(dirname "$conf")" rev-parse --git-dir >/dev/null 2>&1 \
+     && git -C "$(dirname "$conf")" ls-files --error-unmatch "$conf" >/dev/null 2>&1 \
+     && ! git -C "$(dirname "$conf")" diff --quiet HEAD -- "$conf" 2>/dev/null; then
+    echo "REFUSED: $conf has uncommitted changes, so the line that would run is not the one anyone reviewed." >&2
+    echo "  Commit it first. Nothing was written to $LEDGER." >&2; return 2
+  fi
+  out="$(cd "$root" && bash -c "$cmd" 2>&1 </dev/null)"; rc=$?
+  if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ "$outcome" = "pass" ]; then
+    echo "REFUSED: '$key' exited 0 but printed nothing. A command with no output proves nothing (e.g. \`true\`);" >&2
+    echo "  make it print what it checked. Nothing was written to $LEDGER." >&2; return 2
+  fi
   h="$(printf '%s' "$out" | _matrix_hash)" && lh="$(printf '%s' "$line" | _matrix_hash)" || {
     echo "REFUSED: no sha256sum, shasum or openssl found. Nothing was written to $LEDGER." >&2; return 2; }
   printf '%s\n' "$out" | tail -n 5 | sed 's/^/  evidence> /' >&2
@@ -829,27 +857,28 @@ cmd_add() {
   # a command declared in project/commands.conf that this script runs itself.
   local evidence_json=""
   if [ -n "$evidence" ]; then
-    case "$evidence" in
-      *[!\ ]*:[0-9]*) ;;
-      *) echo "REFUSED: --evidence '$evidence' is not a file:line citation. For command output use" >&2
-         echo "  --evidence-cmd EVIDENCE::<name> (declared in project/commands.conf). Nothing was written to $LEDGER." >&2
-         exit 2;;
-    esac
-    evidence_json="$(printf ',"evidence":"%s"' "$(json_escape "$evidence")")"
+    citation_ok "$evidence" || {
+      echo "REFUSED: --evidence '$evidence' is not a file:line citation of a real file and line in this repository." >&2
+      echo "  For command output use --evidence-cmd EVIDENCE::<name> (declared in project/commands.conf)." >&2
+      echo "  Nothing was written to $LEDGER." >&2
+      exit 2; }
+    evidence_json="$(printf ',"citation":"%s"' "$(json_escape "$evidence")")"
   fi
   if [ -n "$evidence_cmd" ]; then
     local _ev; _ev="$(evidence_run "$evidence_cmd" "$outcome")" || exit 2
     evidence_json="${evidence_json}${_ev}"
   fi
-  if [ "$outcome" = "pass" ] && [ "$confidence" = "fresh" ] && { [ "$tier" = "T3" ] || [ "$tier" = "T4" ]; } \
+  # An EMPTY --tier is held to the same rule: a caller must not escape it by leaving the tier off.
+  if [ "$outcome" = "pass" ] && [ "$confidence" = "fresh" ] && { [ "$tier" = "T3" ] || [ "$tier" = "T4" ] || [ -z "$tier" ]; } \
      && [ -z "$evidence_json" ]; then
     local _cited=0 _f _r
     for _f in ${raw_findings[@]+"${raw_findings[@]}"}; do
-      case "$_f" in *::*::*) _r="${_f#*::}"; _r="${_r%%::*}"; [ -n "$_r" ] && _cited=1;; esac
+      case "$_f" in *::*::*) _r="${_f#*::}"; _r="${_r%%::*}"; citation_ok "$_r" && _cited=1;; esac
     done
     if [ "$_cited" -eq 0 ]; then
-      echo "REFUSED: a fresh $tier pass with no evidence. Cite what was checked, any one of:" >&2
+      echo "REFUSED: a fresh ${tier:-untiered} pass with no evidence. Cite what was checked, any one of:" >&2
       echo "    --finding \"info::file:line::what held\"   --evidence file:line   --evidence-cmd EVIDENCE::<name>" >&2
+      echo "  (file:line must name a real file in this repository and a line within it)" >&2
       echo "  core/02-gates.md, the evidence rule: agreement needs the same citation as an objection." >&2
       echo "  Nothing was written to $LEDGER." >&2
       exit 2
@@ -2176,7 +2205,8 @@ cmd_compliance() {
       echo
       echo "  Record one, either is sufficient:"
       echo "    bash $0 add --change $change --gate G1 --tier $tier --round 1 \\"
-      echo "         --outcome pass --confidence fresh --note '<why this change exists>'"
+      echo "         --outcome pass --confidence fresh --note '<why this change exists>' \\"
+      echo "         --evidence <file:line of the intent it was checked against>"
       echo "  (Give REASON='<why>' on the reconcile.sh run that records the route instead, when you fire it:"
       echo "   a second round-1 route for this change would start a new lineage and drop the gates logged so far.)"
       echo
