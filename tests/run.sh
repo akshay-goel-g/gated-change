@@ -3019,7 +3019,7 @@ test_ledger_default_path_success_message_names_the_resolved_path() {
 # The installed shape must not regress while fixing the self-hosting one.
 test_ledger_default_path_is_still_dot_pipeline_when_installed() {
   newrepo
-  ( cd "$REPO" && bash .pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T4 --outcome pass --model m ) >/dev/null 2>&1
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T4 --outcome pass --model m --evidence tests/run.sh:1 ) >/dev/null 2>&1
   [ -f "$(ledger_path)" ] || _fail "an installed copy (kit nested under .pipeline/ inside a bigger repo) must still default there"
   _ok
 }
