@@ -8314,6 +8314,43 @@ test_c1_a_silent_command_may_still_be_recorded_as_the_evidence_for_a_fail() {
   assert_file_contains "$(ledger_path)" '"evidence_exit":0'
 }
 
+test_c1_stderr_counts_as_output_and_is_hashed() {
+  newrepo
+  c1_conf 'EVIDENCE::err::echo oops >&2'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::err
+  assert_exit 0 "a command that only writes to stderr still printed something"
+  local want; want="$(printf '%s' 'oops' | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  assert_file_contains "$(ledger_path)" "\"evidence_sha256\":\"$want\""
+}
+
+test_c1_the_key_matches_only_at_the_start_of_a_line() {
+  newrepo
+  c1_conf '# EVIDENCE::ok::echo wrong-commented' 'x EVIDENCE::ok::echo wrong-midline' 'EVIDENCE::ok::echo right'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
+  assert_exit 0
+  assert_contains "right"
+  assert_not_contains "wrong"
+  local want; want="$(printf '%s' 'EVIDENCE::ok::echo right' | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  assert_file_contains "$(ledger_path)" "\"evidence_line_sha256\":\"$want\""
+}
+
+test_c1_a_bad_evidence_citation_is_refused_whatever_the_outcome() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome fail --evidence "looks fine" --finding "blocking::src/app.js:1::x"; assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome skipped --evidence "nofile.txt:1";                                   assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --confidence low --evidence "nofile.txt:1";                     assert_exit 2
+  [ ! -s "$(ledger_path)" ] || _fail "a refused citation wrote a line"
+}
+
+test_c1_a_real_file_outside_the_repository_is_not_citable() {
+  newrepo
+  printf 'outside\n' > "$REPO/../c1-sibling.txt"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "../c1-sibling.txt:1"
+  assert_exit 2
+  assert_contains ".."
+  rm -f "$REPO/../c1-sibling.txt"
+}
+
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
   assert_file_contains "$KIT/project/surfaces.conf" 'project/commands\.conf$::'
   assert_file_contains "$KIT/templates/project/surfaces.conf" 'project/commands\.conf$::'
