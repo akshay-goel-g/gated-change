@@ -565,8 +565,8 @@ citation_ok() {
 # evidence_run <EVIDENCE::name> <outcome>  --  C1. Looks the name up in project/commands.conf (the `EVIDENCE` kind;
 # KIND::NAME is the key, never a bare name), refuses a MANUAL line (a human step is not evidence a script can
 # produce), runs the command with `bash -c` from the repository root, and prints the JSON fields to append:
-# the key, exit code, sha256 of the combined output, and sha256 of the conf line that was run (so a later edit
-# to commands.conf is visible). A non-zero exit refuses a `pass`. The command's own output goes to stderr.
+# the key, exit code, sha256 of the combined output (trailing newlines trimmed), and sha256 of the conf line that was run (so a later edit
+# to commands.conf is visible). A non-zero exit refuses a `pass`. The last five lines of its output go to stderr.
 # Trust: this moves trust into commands.conf, it does not remove it -- which is why that file is a T4 surface.
 evidence_run() {
   local key="$1" outcome="$2" conf line cmd root out rc h lh

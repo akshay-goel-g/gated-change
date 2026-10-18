@@ -588,7 +588,7 @@ where the dashboard and `compliance` differ, `compliance` is the authority.
 | 3 | Before code | Write `specs/<n>/requirements.md` → `design.md` → `tasks.md` | One file per confirmation. Never all three in one pass |
 | 4 | After build | `CHANGE=<n> REASON="Bug fix" bash .pipeline/tools/reconcile.sh T2 --log` | Exit 1 = under-classified; run every gate the higher tier needs |
 | 5 | After build | Run each mandated gate in a **fresh session** with its card | Hand it the diff + registry; withhold your explanation |
-| 6 | Per gate | `ledger.sh add --change <n> --gate G7 --tier T4 --round 1 --outcome pass\|fail …` | One `--finding` per finding |
+| 6 | Per gate | `ledger.sh add --change <n> --gate G7 --tier T4 --round 1 --outcome pass\|fail …` | One `--finding` per finding; a fresh T3/T4 pass must also cite (`--evidence`, `--evidence-cmd` or an `info` finding with a real `file:line`) |
 | 7 | Before release | `ledger.sh compliance --change <n> --tier T4 --round 1` | **Must exit 0** |
 | 8 | At release | `reconcile.sh --action <name> --evidence "<citation>"` | Only for no-diff events (see below) |
 | 9 | After release | `ledger.sh escape …` if a defect surfaces | Feeds the headline metric |

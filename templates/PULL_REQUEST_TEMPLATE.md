@@ -46,7 +46,7 @@
 
 ## Ledger
 
-- [ ] Runs recorded — `bash tools/ledger.sh add --change <name> --gate <G_> ...`
+- [ ] Runs recorded — `bash tools/ledger.sh add --change <name> --gate <G_> ...` (a fresh T3/T4 pass must cite: an `info` finding with a real `file:line`, `--evidence file:line`, or `--evidence-cmd EVIDENCE::<name>`)
 
 ## Assets
 

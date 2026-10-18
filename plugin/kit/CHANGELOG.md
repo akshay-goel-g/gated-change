@@ -38,6 +38,9 @@ redesigns, recorded in `ledger.jsonl`.
   `project/commands.conf` is now a T4 surface. Write-time only: older lines are not re-judged, and a hand-edited ledger
   still bypasses it (ACTION-PLAN C3). A citation must name an existing file and a line within it; an untiered fresh pass
   is held to the same rule; an `EVIDENCE::` command must print something and `commands.conf` must be committed.
+  Known limits (accepted, ACTION-PLAN C3 and later): a citation proves a real file and line exist, not that they are relevant,
+  and it may be an untracked file; an `EVIDENCE::` command is checked against HEAD for `commands.conf` only, so the files it runs
+  (`tests/run.sh` and the like) may be uncommitted when it runs; the hash is of the output with trailing newlines trimmed.
   Existing installs keep their own `project/commands.conf` (no `EVIDENCE::` lines) until they add some.
   **Action required (existing installs):** `update-kit` does not touch `project/`. To use `--evidence-cmd`, add `EVIDENCE::<name>::<command>`
   lines to your `project/commands.conf` and commit it; to make that file a T4 surface, add
