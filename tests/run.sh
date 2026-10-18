@@ -8192,6 +8192,23 @@ test_c1_an_uncommitted_commands_conf_is_refused() {
   assert_contains "uncommitted"
 }
 
+test_c1_skipped_and_na_outcomes_need_no_citation() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome skipped; assert_exit 0
+  run c1_add --gate G4 --tier T4 --outcome n/a --note "not applicable here"; assert_exit 0
+}
+
+test_c1_evidence_key_matches_whole_names_only_and_tolerates_crlf() {
+  newrepo
+  c1_conf 'EVIDENCE::okay::exit 3' 'EVIDENCE::ok::echo hi'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::ok
+  assert_exit 0 "EVIDENCE::ok must not match the EVIDENCE::okay line"
+  printf 'EVIDENCE::crlf::echo hello\r\n' >> "$REPO/.pipeline/project/commands.conf"
+  git -C "$REPO" commit -qam crlf >/dev/null 2>&1
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::crlf
+  assert_exit 0 "a CRLF conf line runs"
+}
+
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
   assert_file_contains "$KIT/project/surfaces.conf" 'project/commands\.conf$::'
   assert_file_contains "$KIT/templates/project/surfaces.conf" 'project/commands\.conf$::'
