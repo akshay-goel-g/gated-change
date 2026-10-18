@@ -8272,6 +8272,48 @@ test_c1_a_directory_or_a_line_past_the_end_is_not_a_citation() {
   run c1_add --gate G4 --tier T4 --outcome pass --evidence "src/app.js:$((n+1))"; assert_exit 2 "one past the end is not"
 }
 
+test_c1_a_backslash_path_or_an_overlong_range_end_is_not_a_citation() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence '..\x:1';                          assert_exit 2; assert_contains "backslash"
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence 'src\..\..\x:1';                   assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "src/app.js:1-99999";              assert_exit 2 "a range end past the file"
+}
+
+test_c1_a_citation_resolves_against_the_kits_repository_not_the_callers_cwd() {
+  newrepo
+  local other; other="$(mktemp -d "$TMPROOT/other.XXXXXX")"; git -C "$other" init -q; printf 'x\n' > "$other/only-here.txt"
+  run bash -c "cd '$other' && LED_NO_EVIDENCE=1 bash '$REPO/.pipeline/tools/ledger.sh' --ledger '$(ledger_path)' add --change c1 --model m --confidence fresh --gate G4 --tier T4 --outcome pass --evidence only-here.txt:1"
+  assert_exit 2 "a file that exists only in the caller's repository is not citable"
+}
+
+test_c1_an_unknown_or_escaped_key_is_refused_and_the_declared_names_are_listed() {
+  newrepo
+  c1_conf 'EVIDENCE::ok::echo hi'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd 'EVIDENCE::o\x6b'
+  assert_exit 2
+  assert_contains "Declared EVIDENCE names:"
+  assert_contains " ok "
+}
+
+test_c1_drive_letter_nested_dotdot_and_bare_manual_are_all_refused() {
+  newrepo
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "C:/x:1";        assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "a/../../x:1";   assert_exit 2
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence "a/..:1";        assert_exit 2
+  c1_conf 'EVIDENCE::bare::MANUAL'
+  run c1_add --gate G4 --tier T4 --outcome pass --evidence-cmd EVIDENCE::bare
+  assert_exit 2
+  assert_contains "MANUAL"
+}
+
+test_c1_a_silent_command_may_still_be_recorded_as_the_evidence_for_a_fail() {
+  newrepo
+  c1_conf 'EVIDENCE::quiet::true'
+  run c1_add --gate G4 --tier T4 --outcome fail --evidence-cmd EVIDENCE::quiet --finding "blocking::src/app.js:1::x"
+  assert_exit 0
+  assert_file_contains "$(ledger_path)" '"evidence_exit":0'
+}
+
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
   assert_file_contains "$KIT/project/surfaces.conf" 'project/commands\.conf$::'
   assert_file_contains "$KIT/templates/project/surfaces.conf" 'project/commands\.conf$::'

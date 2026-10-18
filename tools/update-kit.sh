@@ -198,5 +198,6 @@ echo "         bash $KIT/tools/install-hook.sh --force"
 echo "    2. Your project/ files are yours and were not merged. If this release"
 echo "       added a config the cards read, CHANGELOG.md's 'Action required'"
 echo "       section is where it says so."
+echo "       (A new commands.conf EVIDENCE:: line or surfaces.conf row is the kind of thing it lists.)"
 echo
 echo "  Then check what changed:  bash $KIT/tools/status.sh"

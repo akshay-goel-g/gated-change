@@ -48,7 +48,7 @@ Before any release:
    may not ship without a reconciliation result. Set `CHANGE=` so the route record
    joins up with the gate records for the same work; on a trunk branch the tool
    refuses the branch-name default.
-4. Log every gate run: `bash .pipeline/tools/ledger.sh add --change <name> ...`
+4. Log every gate run: `bash .pipeline/tools/ledger.sh add --change <name> ...`. A fresh T3/T4 `pass` must cite what it checked: an `info` `--finding "info::<real file:line>::<what held>"`, `--evidence <file:line>`, or `--evidence-cmd EVIDENCE::<name>` (a committed line of `.pipeline/project/commands.conf`); a bare pass is refused.
 5. `bash .pipeline/tools/ledger.sh compliance --change <name> --tier <T> --round <N>`
    — must exit 0. "Reconciled" is a routing verdict; this is the release one.
    An `UNRESOLVED` gate is a footnote in the matrix I have to answer: run it, or

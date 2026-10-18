@@ -144,7 +144,7 @@ for g in G1 G4 G5 G6 G7 G8; do
 done
 ```
 
-*(In real use each of those is a separate fresh review whose findings you log — a loop that
+*(The `info::src/auth/login.js:1` citation must name a file that exists in YOUR repository, or the pass is refused. In real use each of those is a separate fresh review whose findings you log — a loop that
 writes six passes is only here to keep the example short. `04-ledger.md` calls an entry
 written without the work "fiction with a timestamp".)*
 

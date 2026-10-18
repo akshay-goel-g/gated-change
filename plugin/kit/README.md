@@ -807,7 +807,8 @@ checkout a `BASE` it contains.
 ### `ledger.sh` — record and report
 
 ```bash
-ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>]                      [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>]   # a fresh T3/T4 pass must cite (see core/02-gates.md) \
+ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>] \
+                     [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>] \
                      --confidence fresh|low [--challenged true|false] [--model <name>] \
                      [--tokens N | --tokens-in N --tokens-out N] [--minutes N] \
                      [--lane normal|hotfix] [--note "…"] [--finding "severity::location::claim"]…
@@ -913,7 +914,7 @@ Everything project-specific lives in `.pipeline/project/`. Start from `templates
 | File | Purpose | Drives |
 |---|---|---|
 | `surfaces.conf` | Trust surfaces, ignored paths, declared events, targets | `reconcile.sh`, `status.sh`, the pre-push hook, the Claude hook |
-| `commands.conf` | How this project builds and runs | The Package and Deploy phases |
+| `commands.conf` | How this project builds and runs, plus the `EVIDENCE::` commands a gate may cite as proof | The Package and Deploy phases; `ledger.sh add --evidence-cmd` |
 | `registry.md` | Your curated couplings — the file gates actually read | G4 Ripple |
 | `registry-draft.md` | Miner output; disposable | You, curating into `registry.md` |
 | `map.md` | What *exists* — components, owners, how they fail | G4 Ripple (kept true in the diff) |

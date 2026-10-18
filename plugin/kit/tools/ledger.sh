@@ -541,21 +541,25 @@ detect_commit() { git rev-parse --verify -q HEAD 2>/dev/null || printf ''; }
 # Presence of a string is not a citation; this is the cheapest check that the thing cited can exist.
 # It cannot tell whether the line is relevant.
 citation_ok() {
-  local c="$1" f n m root
+  local c="$1" f n m="" root
   CITE_WHY=""
   case "$c" in *:[0-9]*) ;; *) CITE_WHY="no :line number"; return 1;; esac
   f="${c%:*}"; n="${c##*:}"
   case "$c" in *:[0-9]*-*) f="${c%:*}"; n="${c##*:}"; m="${n#*-}"; n="${n%%-*}"
     case "$m" in ''|*[!0-9]*) CITE_WHY="the range end is not a number"; return 1;; esac
     [ "${#m}" -le 9 ] && [ "$m" -ge "$n" ] 2>/dev/null || { CITE_WHY="the range is reversed or too large"; return 1; };; esac
+  case "$f" in *\\*) CITE_WHY="a backslash in the path is not accepted; use /"; return 1;; esac
   case "$n" in ''|*[!0-9]*) CITE_WHY="the line is not a number"; return 1;; esac
   [ "${#n}" -le 9 ] || { CITE_WHY="the line number is too large"; return 1; }
   [ -n "$f" ] && [ "$n" -ge 1 ] || { CITE_WHY="the line must be 1 or more"; return 1; }
   case "$f" in /*|[A-Za-z]:*) CITE_WHY="absolute paths are not accepted; cite a path inside the repository"; return 1;;
                ..|../*|*/..|*/../*) CITE_WHY="a path with .. is not accepted"; return 1;; esac
-  root="$(git rev-parse --show-toplevel 2>/dev/null)" || root="$PWD"
+  # Resolved against the repository the KIT lives in, the same one evidence_run uses, not the caller's cwd.
+  root="$(git -C "$KIT_ROOT" rev-parse --show-toplevel 2>/dev/null)" || { CITE_WHY="the kit is not inside a git repository"; return 1; }
   [ -f "$root/$f" ] || { CITE_WHY="no such file '$f' in the repository"; return 1; }
-  [ "$n" -le "$(awk 'END{print NR}' "$root/$f")" ] || { CITE_WHY="'$f' has fewer than $n lines"; return 1; }
+  local _lines; _lines="$(awk 'END{print NR}' "$root/$f")"
+  [ "$n" -le "$_lines" ] || { CITE_WHY="'$f' has fewer than $n lines"; return 1; }
+  [ -z "$m" ] || [ "$m" -le "$_lines" ] || { CITE_WHY="'$f' has fewer than $m lines"; return 1; }
 }
 
 # evidence_run <EVIDENCE::name> <outcome>  --  C1. Looks the name up in project/commands.conf (the `EVIDENCE` kind;
@@ -572,8 +576,16 @@ evidence_run() {
   esac
   conf="$KIT_ROOT/project/commands.conf"
   [ -f "$conf" ] || { echo "REFUSED: $conf not found. Nothing was written to $LEDGER." >&2; return 2; }
-  line="$(tr -d '\r' < "$conf" | awk -v k="$key::" 'index($0,k)==1 {print; exit}')"
-  [ -n "$line" ] || { echo "REFUSED: no '$key' line in $conf. Nothing was written to $LEDGER." >&2; return 2; }
+  # Read ONCE: the bytes compared with HEAD below are the bytes the command is taken from.
+  local _working _names
+  _working="$(tr -d '\r' < "$conf")"
+  line="$(printf '%s\n' "$_working" | K="$key::" awk 'BEGIN{k=ENVIRON["K"]} index($0,k)==1 {print; exit}')"
+  if [ -z "$line" ]; then
+    _names="$(printf '%s\n' "$_working" | awk -F'::' '$1=="EVIDENCE"{printf "%s ", $2}')"
+    echo "REFUSED: no '$key' line in $conf. Nothing was written to $LEDGER." >&2
+    echo "  Declared EVIDENCE names: ${_names:-none}. Add 'EVIDENCE::<name>::<command>' to project/commands.conf and commit it." >&2
+    return 2
+  fi
   cmd="${line#"$key"::}"
   case "$cmd" in
     MANUAL::*|MANUAL) echo "REFUSED: '$key' is a MANUAL line (${cmd#MANUAL::}). A human step is not evidence this tool can run;" >&2
@@ -586,17 +598,17 @@ evidence_run() {
   # The line that runs must be the one that was reviewed: fail CLOSED unless commands.conf is committed in HEAD
   # and the working copy is the same bytes (compared with CR removed, so an autocrlf checkout is not a change).
   # `git diff` is not used: skip-worktree and assume-unchanged hide a modified file from it.
-  local _d _pre _committed _working
+  local _d _pre _committed
   _d="$(dirname "$conf")"
   _pre="$(git -C "$_d" rev-parse --show-prefix 2>/dev/null)" || _pre="?"
-  _committed="$(git -C "$_d" show "HEAD:${_pre}commands.conf" 2>/dev/null | tr -d '\r')"; rc=$?
-  _working="$(tr -d '\r' < "$conf")"
+  _committed="$(git -C "$_d" show "HEAD:${_pre}commands.conf" 2>/dev/null | tr -d '\r')"
   if [ "$_pre" = "?" ] || [ -z "$_committed" ] || [ "$_committed" != "$_working" ]; then
     echo "REFUSED: $conf is not committed exactly as it is on disk, so the line that would run is not one anyone reviewed." >&2
     echo "  Commit it first (git add, git commit). Nothing was written to $LEDGER." >&2; return 2
   fi
   local _to=""
-  command -v timeout >/dev/null 2>&1 && _to="timeout 600"
+  # GNU timeout only: Windows ships a different timeout.exe that would break the run.
+  timeout --version >/dev/null 2>&1 && _to="timeout 600"
   out="$(cd "$root" && $_to bash -c "$cmd" 2>&1 </dev/null)"; rc=$?
   if [ "$rc" -eq 0 ] && [ -z "$out" ] && [ "$outcome" = "pass" ]; then
     echo "REFUSED: '$key' exited 0 but printed nothing. A command with no output proves nothing (e.g. \`true\`);" >&2
@@ -651,7 +663,7 @@ cmd_add() {
     esac
   done
   [ -n "$change" ] && [ -n "$gate" ] || {
-    echo "usage: ledger.sh add --change <name> --gate <G1..G8> [--tier T3] ..." >&2; exit 2; }
+    echo "usage: ledger.sh add --change <name> --gate <G1..G8> [--tier T3] [--evidence file:line | --evidence-cmd EVIDENCE::<name>] ..." >&2; exit 2; }
   change_is_branchy "$change" && refuse_branchy_change "$change"
 
   # These land in a BARE (unquoted) JSON position in the emit() template below
