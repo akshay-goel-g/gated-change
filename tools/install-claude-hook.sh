@@ -95,10 +95,13 @@ fi
 mkdir -p "$SETTINGS_DIR"
 [ -f "$SETTINGS" ] || printf '{}\n' > "$SETTINGS"
 
-RESULT="$("$PY" - "$SETTINGS" "$COMMAND" <<'PYEOF'
+# merge_hook <event> <matcher or ""> <command> <timeout seconds or "">  -- prints INSTALLED, ALREADY_PRESENT
+# or PARSE_ERROR:<why>. The PostToolUse entry (R0c) and the Stop entry (stop-compliance.sh) share it.
+merge_hook() {
+"$PY" - "$SETTINGS" "$1" "$2" "$3" "$4" <<'PYEOF'
 import json, sys
 
-path, command = sys.argv[1], sys.argv[2]
+path, event, matcher, command, timeout = sys.argv[1:6]
 
 with open(path, "r", encoding="utf-8") as f:
     raw = f.read().strip()
@@ -113,7 +116,7 @@ if not isinstance(data, dict):
     sys.exit(1)
 
 hooks = data.setdefault("hooks", {})
-post = hooks.setdefault("PostToolUse", [])
+post = hooks.setdefault(event, [])
 
 already = any(
     isinstance(entry, dict)
@@ -128,10 +131,13 @@ if already:
     print("ALREADY_PRESENT")
     sys.exit(0)
 
-post.append({
-    "matcher": "Edit|Write|MultiEdit",
-    "hooks": [{"type": "command", "command": command}],
-})
+entry_hook = {"type": "command", "command": command}
+if timeout:
+    entry_hook["timeout"] = int(timeout)
+entry = {"hooks": [entry_hook]}
+if matcher:
+    entry["matcher"] = matcher
+post.append(entry)
 
 with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
@@ -139,7 +145,9 @@ with open(path, "w", encoding="utf-8") as f:
 
 print("INSTALLED")
 PYEOF
-)"
+}
+
+RESULT="$(merge_hook PostToolUse "Edit|Write|MultiEdit" "$COMMAND" "")"
 STATUS=$?
 
 if [ "$STATUS" -ne 0 ]; then
@@ -166,3 +174,22 @@ case "$RESULT" in
     echo "  (core/01-router.md) instead of relying on anyone remembering to."
     ;;
 esac
+
+# The Stop hook (tools/hooks/stop-compliance.sh): refuse to end a session while the routed T3/T4 change
+# fails `ledger.sh compliance`. Registered with a timeout that allows for compliance's 35-95s.
+STOP_SCRIPT="$KIT/tools/hooks/stop-compliance.sh"
+if [ -f "$STOP_SCRIPT" ]; then
+  STOP_REL="${KIT_PREFIX:+$KIT_PREFIX/}tools/hooks/stop-compliance.sh"
+  STOP_COMMAND="bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL\""
+  STOP_RESULT="$(merge_hook Stop "" "$STOP_COMMAND" 180)"
+  case "$STOP_RESULT" in
+    ALREADY_PRESENT) echo "Stop hook already installed in $SETTINGS." ;;
+    INSTALLED)
+      echo
+      echo "Stop hook installed: a session will not end while the latest T3/T4 route fails"
+      echo "  'ledger.sh compliance' (tools/hooks/stop-compliance.sh). It blocks at most once per stop,"
+      echo "  fails open on anything it cannot establish, and PIPELINE_STOP_HOOK=off disables it."
+      ;;
+    *) echo "Could not install the Stop hook: ${STOP_RESULT#PARSE_ERROR:}" >&2 ;;
+  esac
+fi

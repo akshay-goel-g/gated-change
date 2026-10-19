@@ -106,6 +106,16 @@ Installs by merging into `.claude/settings.json`, never overwriting it — the f
 hold hooks or permissions this kit knows nothing about. Idempotent: running it again once
 installed reports that and changes nothing.
 
+The same installer also registers a **`Stop` hook** (`tools/hooks/stop-compliance.sh`). The
+`PostToolUse` reminder cannot block; a `Stop` hook can refuse to let the agent say "done". It acts
+only when the ledger's latest `route` is T3/T4 and `ledger.sh compliance` for that change fails: it
+then returns `{"decision":"block","reason":...}` with the unmet gates. It blocks at most once per
+stop (it allows when Claude Code reports `stop_hook_active`), at most `PIPELINE_STOP_MAX_ATTEMPTS`
+(3) times for an unchanged state (HEAD, working tree, ledger), and it fails **open** on anything it
+cannot establish (no ledger, no route, no git, a compliance fault or timeout).
+`PIPELINE_STOP_HOOK=off` disables it. Claude Code also caps consecutive Stop continuations itself.
+Compliance takes 35-95s on a large ledger, so it is registered with a 180s timeout.
+
 ---
 
 ## 5. The exception audit (the part everyone forgets)

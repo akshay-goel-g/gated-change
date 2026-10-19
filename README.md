@@ -311,7 +311,7 @@ the [`surfaces.conf` reference](#surfacesconf--the-file-that-does-the-work) for 
 
 ```bash
 bash .pipeline/tools/install-hook.sh            # git pre-push hook, derived from your T4 rows
-bash .pipeline/tools/install-claude-hook.sh     # Claude Code only: re-entry reminder on every edit
+bash .pipeline/tools/install-claude-hook.sh     # Claude Code only: re-entry reminder on every edit + a Stop hook that blocks "done" while a T3/T4 change fails compliance
 mkdir -p .github && cp .pipeline/templates/PULL_REQUEST_TEMPLATE.md .github/
 ```
 
@@ -874,7 +874,7 @@ derived gate state machine as JSON.
 
 ```bash
 bash .pipeline/tools/install-hook.sh [--force]    # .git/hooks/pre-push
-bash .pipeline/tools/install-claude-hook.sh        # .claude/settings.json PostToolUse hook
+bash .pipeline/tools/install-claude-hook.sh        # .claude/settings.json: PostToolUse reminder + Stop hook
 ```
 
 Both derive their rules from `surfaces.conf` and **refuse to install something that guards
@@ -1001,7 +1001,7 @@ strongest — **use all four**, because they fail in different situations.
 | 1 | **Agent instructions** (`templates/agent-instructions.md`) | Weak, necessary | The only one that acts *before* work starts, when routing is cheap. Relies on the agent choosing to follow it |
 | 2 | **PR checklist** (`templates/PULL_REQUEST_TEMPLATE.md`) | Medium | Carries predicted tier, reconciled tier, gates run and one named doubt where a reviewer sees them. The blanks are deliberate — a tick gets ticked without reading; an empty blank gets noticed |
 | 3 | **Pre-push hook** (`install-hook.sh`) | Strong | Refuses to let a T4-touching push leave your machine unless a file in `security-reports/` names a commit that **contains every trust-boundary change in the push**. A time window is not evidence; a sha is. Also regenerates and commits `dashboard.html` (see Quick start step 4) |
-| 4 | **Claude Code hook** (`install-claude-hook.sh`) | Strong | On every `Edit`/`Write`, checks the file against your T3/T4 rows and prints the R0c re-entry reminder |
+| 4 | **Claude Code hook** (`install-claude-hook.sh`) | Strong | On every `Edit`/`Write`, checks the file against your T3/T4 rows and prints the R0c re-entry reminder; a `Stop` hook also blocks ending the session while the latest T3/T4 route fails `compliance` (blocks once per stop, fails open) |
 
 The hook is a **separate copy** under `.git/hooks/`, so `update-kit.sh` does not refresh it —
 re-run `install-hook.sh --force` after an update. `status.sh` tells you when it has fallen

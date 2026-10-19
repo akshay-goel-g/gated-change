@@ -31,6 +31,12 @@ redesigns, recorded in `ledger.jsonl`.
 
 ### Added
 
+- **Stop hook (ACTION-PLAN C2).** `install-claude-hook.sh` now also registers `tools/hooks/stop-compliance.sh` as a
+  Claude Code `Stop` hook. When the ledger's latest route is T3/T4 and `ledger.sh compliance` for it fails, the session
+  cannot end: the hook returns a block with the unmet gates. Once per stop (`stop_hook_active`), at most 3 times for an
+  unchanged state, fail-open on anything it cannot establish, off with `PIPELINE_STOP_HOOK=off`. **Action required
+  (existing installs):** re-run `bash .pipeline/tools/install-claude-hook.sh` to add the hook to `.claude/settings.json`.
+  Tests: `bash tests/stop-hook-e2e.sh`.
 - **Gate evidence (ACTION-PLAN C1).** `ledger.sh add` now refuses a *fresh* T3/T4 `pass` that cites nothing. Accepted:
   a finding with a location (an `info` finding is the form for "checked, holds"), `--evidence file:line`, or
   `--evidence-cmd EVIDENCE::<name>`, which runs a line declared in `project/commands.conf`, records the exit code, a

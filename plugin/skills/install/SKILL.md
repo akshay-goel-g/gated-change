@@ -35,7 +35,7 @@ steps do, then wait:
 Two later steps change files **outside** `.pipeline/`. Ask separately for each, and only run it on a yes:
 
 - `bash .pipeline/tools/install-hook.sh` writes `.git/hooks/pre-push`.
-- `bash .pipeline/tools/install-claude-hook.sh` merges a reminder hook into `.claude/settings.json`.
+- `bash .pipeline/tools/install-claude-hook.sh` merges a reminder hook and a Stop hook (blocks "done" while a T3/T4 change fails compliance; `PIPELINE_STOP_HOOK=off` disables it) into `.claude/settings.json`.
 
 ## 3. Copy the kit
 
