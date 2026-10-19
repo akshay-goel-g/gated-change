@@ -166,5 +166,36 @@ led route --change spaced --predicted T4 --actual T4 --reason "x"
 OUT="$(hook '{"stop_hook_active": true}')"; [ -z "$OUT" ] && ok "stop_hook_active (spaced form): allows" || bad "stop_hook_active spaced form" "$OUT"
 OUT="$(hook '{"stop_hook_active":false}')"; case "$OUT" in *'"decision":"block"'*) ok "stop_hook_active false: still blocks";; *) bad "stop_hook_active false" "$OUT";; esac
 
+# 18. a PASSING result is cached for an unchanged state (no second compliance run), and any change re-checks
+newrepo
+led route --change cached --predicted T4 --actual T4 --reason "x"
+RUNLOG="$TMPROOT/runs.log"; rm -f "$RUNLOG"
+printf '#!/usr/bin/env bash\necho run >> "%s"\nexit 0\n' "$RUNLOG" > "$R/tools/ledger.sh"
+git -C "$R" add -A >/dev/null 2>&1; git -C "$R" commit -qm stub >/dev/null 2>&1
+hook >/dev/null; hook >/dev/null
+N="$(wc -l < "$RUNLOG" 2>/dev/null | tr -d ' ')"; [ "$N" = "1" ] && ok "pass cache: compliance ran once for an unchanged state" || bad "pass cache" "runs: $N"
+git -C "$R" commit -q --allow-empty -m progress >/dev/null 2>&1
+hook >/dev/null
+N="$(wc -l < "$RUNLOG" | tr -d ' ')"; [ "$N" = "2" ] && ok "pass cache: a new commit re-checks" || bad "pass cache re-check" "runs: $N"
+
+# 19. a very long compliance line is bounded, and a tab does not break the JSON
+newrepo
+led route --change longline --predicted T4 --actual T4 --reason "x"
+printf '#!/usr/bin/env bash\nprintf "A\\ttab "; head -c 5000 /dev/zero | tr "\\000" "x"; echo\nexit 1\n' > "$R/tools/ledger.sh"
+OUT="$(hook)"
+if [ -n "$PY" ]; then
+  printf '%s' "$OUT" | "$PY" -c "import json,sys; d=json.load(sys.stdin); assert d['decision']=='block' and len(d['reason'])<2500" 2>/dev/null \
+    && ok "long line: bounded and valid JSON; tab handled" || bad "long line bound" "${#OUT} chars"
+else echo "  SKIP  no python"; fi
+
+# 20. the installer exits non-zero when the Stop entry cannot be written
+if [ -n "$PY" ]; then
+  newrepo
+  printf 'T4::(^|/)auth/::auth\n' > "$R/project/surfaces.conf"
+  mkdir -p "$R/.claude"; printf '{"hooks":{"Stop":"x"}}\n' > "$R/.claude/settings.json"
+  ( cd "$R" && bash tools/install-claude-hook.sh ) >/dev/null 2>&1; RC=$?
+  [ "$RC" -ne 0 ] && ok "installer: a failed Stop merge exits non-zero" || bad "installer exit status" "rc=$RC"
+fi
+
 echo; printf 'passed %s . failed %s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

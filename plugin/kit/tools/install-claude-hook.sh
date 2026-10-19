@@ -203,8 +203,10 @@ if [ -f "$STOP_SCRIPT" ]; then
       echo "  'ledger.sh compliance' (tools/hooks/stop-compliance.sh). It blocks at most once per stop,"
       echo "  fails open on anything it cannot establish, and PIPELINE_STOP_HOOK=off disables it."
       ;;
-    *) echo "Could not install the Stop hook: ${STOP_RESULT#PARSE_ERROR:}" >&2
+    *) STOP_FAILED=1
+       echo "Could not install the Stop hook: ${STOP_RESULT:+${STOP_RESULT#PARSE_ERROR:}}${STOP_RESULT:-(the merge produced no output)}" >&2
        echo "  (the R0c reminder above is installed; add the Stop entry by hand: event \"Stop\", no matcher," >&2
        echo "   command ${STOP_COMMAND}, timeout 180)" >&2 ;;
   esac
 fi
+[ "${STOP_FAILED:-0}" -eq 0 ] || exit 1

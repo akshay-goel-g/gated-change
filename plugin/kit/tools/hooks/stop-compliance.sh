@@ -75,10 +75,14 @@ if [ -f "$STATE" ]; then
   case "$PREV_N" in ''|*[!0-9]*) PREV_N=0;; esac
 fi
 if [ "$PREV_FP" = "$FP" ] && [ "$PREV_N" -ge "$MAX_ATTEMPTS" ]; then exit 0; fi
+# A passing run is remembered for the same unchanged state: compliance takes about a minute, and a session
+# unrelated to an old, already-compliant T3/T4 route should not pay it on every stop.
+PASSFILE="$GITDIR/gated-change-stop-pass"
+if [ -f "$PASSFILE" ] && [ "$(cat "$PASSFILE" 2>/dev/null)" = "$FP" ]; then exit 0; fi
 
 OUT="$(cd "$(git -C "$KIT" rev-parse --show-toplevel)" && LEDGER="$LEDGER" bash "$KIT/tools/ledger.sh" compliance --change "$CHANGE" --tier "$TIER" --round "$ROUND" 2>&1)"
 RC=$?
-[ "$RC" -ne 0 ] || { rm -f "$STATE" 2>/dev/null; exit 0; }
+[ "$RC" -ne 0 ] || { rm -f "$STATE" 2>/dev/null; printf '%s\n' "$FP" > "$PASSFILE" 2>/dev/null || true; exit 0; }
 # 2 is a usage error or a tool fault, not a verdict: fail open.
 [ "$RC" -eq 1 ] || exit 0
 
@@ -97,7 +101,7 @@ case "$CHANGE" in
     CHECKCMD="bash \"$KIT/tools/ledger.sh\" compliance --change $CHANGE --tier $TIER --round $ROUND";;
 esac
 
-BODY="$(printf '%s\n' "$OUT" | grep -vE '^[[:space:]]*PASS[[:space:]]')"
+BODY="$(printf '%s\n' "$OUT" | grep -vE '^[[:space:]]*PASS[[:space:]]' | cut -c1-300)"
 if [ "$(printf '%s\n' "$BODY" | wc -l)" -gt 24 ]; then
   BODY="$(printf '%s\n' "$BODY" | head -n 12)
   [...]
@@ -108,7 +112,9 @@ BODY="${BODY//"$CHANGE"/$SHOWN}"
 REASON="$(printf 'gated-change: %s is routed %s (round %s) and `ledger.sh compliance` does not pass, so it is not done.\n\n%s\n\nRun each missing gate as a FRESH-context review (a subagent or new session handed the card in core/cards/, never the author grading its own work; core/02-gates.md), log each with ledger.sh add, then check again:\n  %s\n(Blocked %s of %s times for this state; PIPELINE_STOP_HOOK=off disables this hook.)' \
   "$SHOWN" "$TIER" "$ROUND" "$BODY" "$CHECKCMD" "$N" "$MAX_ATTEMPTS")"
 
-# JSON string: backslash, quote, newline, tab; every other control character (CR included) is dropped.
-ESC="$(printf '%s' "$REASON" | LC_ALL=C tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | awk 'BEGIN{ORS=""} {if (NR>1) print "\\n"; print}')"
+# JSON string: backslash, quote and newline are escaped, tab becomes a space, every other control character
+# (CR included) is dropped.
+# A tab becomes a space first: BSD sed reads \t as a literal t, so no sed escape for it.
+ESC="$(printf '%s' "$REASON" | LC_ALL=C tr '\011' ' ' | LC_ALL=C tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | awk 'BEGIN{ORS=""} {if (NR>1) print "\\n"; print}')"
 printf '{"decision":"block","reason":"%s"}\n' "$ESC"
 exit 0

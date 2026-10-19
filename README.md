@@ -1203,6 +1203,7 @@ tools/                   status · reconcile · ledger · mine-registry · dashb
                          benchmark/
 examples/                walkthrough, surfaces.conf per project type, registry entries
 tests/run.sh             the kit's own suite — `bash tests/run.sh`. No dependencies
+tests/stop-hook-e2e.sh   the Claude Code Stop hook and its installer wiring — `bash tests/stop-hook-e2e.sh`
 tests/plugin-e2e.sh      installs the Claude Code plugin into scratch repos for every example project type — `bash tests/plugin-e2e.sh`, about two minutes
 tests/plugin-agent-e2e.sh  has a real Claude Code agent follow the install skill in scratch repos (asks before writing, honours a no) — needs `claude`, calls the model, costs a few cents
 experiments/             benchmark results land here

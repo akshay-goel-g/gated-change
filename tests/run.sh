@@ -8353,7 +8353,10 @@ test_c1_a_real_file_outside_the_repository_is_not_citable() {
 
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
   assert_file_contains "$KIT/project/surfaces.conf" 'project/commands\.conf$::'
-  assert_file_contains "$KIT/templates/project/surfaces.conf" 'project/commands\.conf$::'
+  assert_file_contains "$KIT/templates/project/surfaces.conf" '# T4::(^|/)project/commands\.conf$::'
+  if grep -qE '^T4::.*project/commands' "$KIT/templates/project/surfaces.conf"; then
+    _fail "the template must ship the commands.conf T4 row commented out"
+  else _ok; fi
 }
 
 # ================================================================ runner

@@ -49,3 +49,7 @@ jobs:
       - name: Kit self-consistency
         shell: bash
         run: bash tools/dashboard.sh --check
+
+      - name: Stop-hook tests
+        shell: bash
+        run: bash tests/stop-hook-e2e.sh
