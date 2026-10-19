@@ -8381,7 +8381,7 @@ test_c3_verify_catches_an_edit_a_deletion_and_an_insertion() {
   c3_route 1; c3_route 2; c3_route 3; c3_route 4
   local f; f="$(ledger_path)"; cp "$f" "$f.good"
   sed -i '2s/chain test 2/EDITED/' "$f"
-  run led verify; assert_exit 1 "an edited line"; assert_contains "BREAK  line 3"
+  run led verify; assert_exit 1 "an edited line"; assert_contains "BREAK  record 3"
   cp "$f.good" "$f"; sed -i '2d' "$f"
   run led verify; assert_exit 1 "a deleted line"; assert_contains "BREAK"
   cp "$f.good" "$f"; sed -i '2a {"type":"note"}' "$f"
@@ -8418,6 +8418,70 @@ test_c3_a_crlf_checkout_still_verifies() {
   sed -i 's/$/\r/' "$(ledger_path)"
   run led verify
   assert_exit 0 "line endings are not tampering"
+}
+
+test_c3_a_forged_or_edited_record_cannot_pass_as_a_join() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4; c3_route 5
+  local f h1; f="$(ledger_path)"; cp "$f" "$f.good"
+  h1="$(sed -n 1p "$f" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  # a forged record after record 2 that links to record 1's hash: no hashing needed by the forger
+  awk -v h="$h1" 'NR==2{print; print "{\"type\":\"forged\",\"prev\":\"" h "\"}"; next}1' "$f.good" > "$f"
+  run led verify; assert_exit 1 "a forged insert"; assert_contains "BREAK"
+  # an edit, with the downstream prevs rewritten to an old hash
+  cp "$f.good" "$f"; sed -i '3s/chain test 3/EVIL/' "$f"
+  sed -i -E "4s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/;5s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/" "$f"
+  run led verify; assert_exit 1 "an edit with cheap prev rewrites"; assert_contains "BREAK"
+  # DOCUMENTED LIMIT: a chain authenticates order, not authors. A verbatim copy of an earlier record appended at the
+  # tail reads as a join (a note), exactly as a legitimately appended record would. Pin the head to catch it.
+  cp "$f.good" "$f"; sed -n 2p "$f.good" >> "$f"
+  run led verify; assert_exit 0 "an appended copy is not detectable by the chain alone"; assert_contains "JOIN"
+}
+
+test_c3_a_two_line_branch_concatenated_is_still_a_join() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"; cp "$f" "$f.fork"
+  c3_route 3; c3_route 4; cp "$f" "$f.a"
+  cp "$f.fork" "$f"; c3_route 5; c3_route 6
+  tail -n 2 "$f" > "$f.b"; cat "$f.a" "$f.b" > "$f"
+  run led verify; assert_exit 0; assert_contains "1 join(s)"
+}
+
+test_c3_stripping_every_prev_is_caught_only_against_git() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  local f; f="$(ledger_path)"
+  sed -i -E 's/,"prev":"[0-9a-f]+"\}$/}/' "$f"
+  run led verify; assert_exit 0 "plain verify reads a stripped ledger as all-legacy"; assert_contains "3 legacy"
+  run led verify --against HEAD; assert_exit 1 "committed history is the anchor"; assert_contains "NOT a prefix"
+  git -C "$REPO" checkout -q -- "$f"
+  run led verify --against HEAD; assert_exit 0; assert_contains "exact prefix"
+  c3_route 4
+  run led verify --against HEAD; assert_exit 0 "new records after the commit are fine"
+  sed -i '$d' "$f"; sed -i '$d' "$f"
+  run led verify --against HEAD; assert_exit 1 "a truncation into committed records"
+  run led verify --against no-such-rev; assert_exit 2
+}
+
+test_c3_blank_lines_are_ignored_and_never_chained_onto() {
+  newrepo
+  c3_route 1; c3_route 2
+  printf '\n\n' >> "$(ledger_path)"
+  run led verify; assert_exit 0 "a trailing blank line is not a break"; assert_contains "2 chained"
+  c3_route 3
+  run led verify; assert_exit 0 "a record after a blank line links to the last real record"; assert_contains "3 chained (3 linked"
+}
+
+test_c3_a_ledger_path_with_spaces_and_a_prevlike_note_verify() {
+  newrepo
+  local d="$REPO/dir with space"; mkdir -p "$d"
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$d/l.jsonl" route --change c3 --predicted T2 --actual T2 --reason 'x,"prev":"abc"}' ) >/dev/null 2>&1
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$d/l.jsonl" route --change c3 --predicted T2 --actual T2 --reason y ) >/dev/null 2>&1
+  run bash -c "cd '$REPO' && bash .pipeline/tools/ledger.sh --ledger '$d/l.jsonl' verify"
+  assert_exit 0
+  assert_contains "2 chained (2 linked"
 }
 
 test_c3_verify_refuses_unknown_options() {

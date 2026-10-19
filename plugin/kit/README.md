@@ -409,6 +409,8 @@ the numbers readable.
   history); a ref that names nothing is reported and ignored. If the ledger names gated commits but none is
   reachable from where you are (a squash or rebase merge, or another branch), log a gate on the commit you
   are on to anchor the count.
+- **After resolving a `ledger.jsonl` conflict, run `ledger.sh verify`**: the concatenated branch shows as a `JOIN` note
+  (exit 0). A conflict marker left in the file is a BREAK.
 - **Do not union-merge `ledger.jsonl`.** When two branches both log gates, the ledger conflicts
   when you merge; keep both sides' lines in the order they were logged, then run `compliance` and
   re-log any gate whose pass came from the other branch. A union merge hides the conflict and lets
@@ -807,7 +809,7 @@ checkout a `BASE` it contains.
 ### `ledger.sh` — record and report
 
 ```bash
-ledger.sh verify     [--expect-head <hash>]   # walks the per-line sha256 chain; exit 1 on an in-place edit, deletion or insertion
+ledger.sh verify     [--expect-head <hash>] [--against <rev>]   # walks the per-line sha256 chain; exit 1 on an in-place edit, deletion or insertion
 ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>] \
                      [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>] \
                      --confidence fresh|low [--challenged true|false] [--model <name>] \
