@@ -1020,7 +1020,7 @@ is how you start a *fresh session* for the verify gates.
 
 | Agent | Fresh session for G4–G8 | Notes |
 |---|---|---|
-| **Claude Code** | A subagent (the `Agent` tool) given the card path and the diff | `install-claude-hook.sh` adds the R0c reminder |
+| **Claude Code** | A subagent (the `Agent` tool) given the card path and the diff | `install-claude-hook.sh` adds the R0c reminder and a Stop hook that blocks ending the session while a T3/T4 change fails compliance |
 | **Cursor / Copilot / Windsurf** | A new chat/composer, with the card pasted or attached | Paste `agent-instructions.md` into `.cursorrules` / the equivalent |
 | **Codex / CLI agents** | A separate invocation with the card and `git diff` piped in | `AGENTS.md` carries the instructions |
 | **No agent (human)** | You, on a different day or a different branch checkout | The protocols apply to people too |
@@ -1088,6 +1088,7 @@ hand is how a project loses the three things it cannot recover: `project/`, `led
 ```bash
 bash .pipeline/tools/update-kit.sh ../gated-change --dry-run   # see what would move
 bash .pipeline/tools/update-kit.sh ../gated-change             # then do it
+bash .pipeline/tools/install-claude-hook.sh                    # Claude Code: register any new hook (the Stop hook)
 bash .pipeline/tools/install-hook.sh --force                   # the hook is a SEPARATE copy
 ```
 

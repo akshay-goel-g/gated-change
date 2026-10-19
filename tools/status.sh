@@ -553,6 +553,11 @@ if grep -qs "r0c-post-edit" "$REPO_ROOT/.claude/settings.json" 2>/dev/null; then
 else
   say "  [ ] R0c re-entry hook NOT installed → bash $KIT/tools/install-claude-hook.sh"
 fi
+if grep -qs "stop-compliance" "$REPO_ROOT/.claude/settings.json" 2>/dev/null; then
+  say "  [x] Stop hook installed (Claude Code): a T3/T4 change that fails compliance blocks the session end"
+else
+  say "  [ ] Stop hook NOT installed → bash $KIT/tools/install-claude-hook.sh"
+fi
 
 if [ -f "$DASHBOARD" ]; then
   if [ -f "$LEDGER" ] && [ "$LEDGER" -nt "$DASHBOARD" ]; then

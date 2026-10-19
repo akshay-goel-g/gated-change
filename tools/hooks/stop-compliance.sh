@@ -37,8 +37,9 @@ LEDGER="${LEDGER:-$KIT/ledger.jsonl}"
 
 INPUT="$(cat)"
 
-# Same one-key sed extraction every JSON-reading tool in this kit uses. `stop_hook_active` is a bare
-# JSON boolean at the top level of the Stop payload.
+# `stop_hook_active` is a bare JSON boolean at the top level of the Stop payload. A glob match on the compact
+# form (and the one-space form) rather than a parser: a payload spaced any other way reads as "not active",
+# which only costs one extra block, never a trap.
 case "$INPUT" in
   *'"stop_hook_active":true'*|*'"stop_hook_active": true'*) exit 0;;
 esac
@@ -84,11 +85,30 @@ RC=$?
 if [ "$PREV_FP" = "$FP" ]; then N=$((PREV_N + 1)); else N=1; fi
 printf '%s %s\n' "$FP" "$N" > "$STATE" 2>/dev/null || true
 
-BODY="$(printf '%s\n' "$OUT" | grep -vE '^[[:space:]]*PASS[[:space:]]' | head -n 24)"
-REASON="$(printf 'gated-change: %s is routed %s (round %s) and `ledger.sh compliance` does not pass, so it is not done.\n\n%s\n\nRun the missing gates (core/02-gates.md) and log each with ledger.sh add, then check again:\n  bash %s/tools/ledger.sh compliance --change %s --tier %s --round %s\n(Blocked %s of %s times for this state; PIPELINE_STOP_HOOK=off disables this hook.)' \
-  "$CHANGE" "$TIER" "$ROUND" "$BODY" "$KIT" "$CHANGE" "$TIER" "$ROUND" "$N" "$MAX_ATTEMPTS")"
+# The change name is ledger content, and this text goes to the model. Show a name only if it is made of
+# ordinary characters; otherwise show a sanitised one and give NO pasteable command, so a hostile name cannot
+# become a shell command or smuggle instructions into the reason.
+case "$CHANGE" in
+  *[!A-Za-z0-9._/-]*)
+    SHOWN="$(printf '%s' "$CHANGE" | tr -c 'A-Za-z0-9._/-' '?' | cut -c1-80)"
+    CHECKCMD="(the change name contains unusual characters; run ledger.sh compliance for it by hand)";;
+  *)
+    SHOWN="$CHANGE"
+    CHECKCMD="bash \"$KIT/tools/ledger.sh\" compliance --change $CHANGE --tier $TIER --round $ROUND";;
+esac
 
-# JSON string: backslash, quote, newline, tab; every other control character is dropped.
-ESC="$(printf '%s' "$REASON" | LC_ALL=C tr -d '\000-\010\013\014\016-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | awk 'BEGIN{ORS=""} {if (NR>1) print "\\n"; print}')"
+BODY="$(printf '%s\n' "$OUT" | grep -vE '^[[:space:]]*PASS[[:space:]]')"
+if [ "$(printf '%s\n' "$BODY" | wc -l)" -gt 24 ]; then
+  BODY="$(printf '%s\n' "$BODY" | head -n 12)
+  [...]
+$(printf '%s\n' "$BODY" | tail -n 12)"
+fi
+# The raw change name appears in compliance's own text; show the sanitised one there too.
+BODY="${BODY//"$CHANGE"/$SHOWN}"
+REASON="$(printf 'gated-change: %s is routed %s (round %s) and `ledger.sh compliance` does not pass, so it is not done.\n\n%s\n\nRun each missing gate as a FRESH-context review (a subagent or new session handed the card in core/cards/, never the author grading its own work; core/02-gates.md), log each with ledger.sh add, then check again:\n  %s\n(Blocked %s of %s times for this state; PIPELINE_STOP_HOOK=off disables this hook.)' \
+  "$SHOWN" "$TIER" "$ROUND" "$BODY" "$CHECKCMD" "$N" "$MAX_ATTEMPTS")"
+
+# JSON string: backslash, quote, newline, tab; every other control character (CR included) is dropped.
+ESC="$(printf '%s' "$REASON" | LC_ALL=C tr -d '\000-\010\013-\037' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' | awk 'BEGIN{ORS=""} {if (NR>1) print "\\n"; print}')"
 printf '{"decision":"block","reason":"%s"}\n' "$ESC"
 exit 0

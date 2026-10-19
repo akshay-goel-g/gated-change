@@ -81,6 +81,9 @@ for c in python3 python; do command -v "$c" >/dev/null 2>&1 && { PY="$c"; break;
 # paste back in.
 COMMAND_JSON_ESCAPED="$(printf '%s' "$COMMAND" | sed 's/"/\\"/g')"
 SNIPPET_ONE_LINE="{ \"matcher\": \"Edit|Write|MultiEdit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$COMMAND_JSON_ESCAPED\" } ] }"
+STOP_REL_NP="${KIT_PREFIX:+$KIT_PREFIX/}tools/hooks/stop-compliance.sh"
+STOP_JSON_NP="$(printf '%s' "bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL_NP\"" | sed 's/"/\\"/g')"
+STOP_SNIPPET_ONE_LINE="{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$STOP_JSON_NP\", \"timeout\": 180 } ] }"
 
 if [ -z "$PY" ]; then
   echo "No python3/python found — refusing to hand-edit JSON that isn't mine." >&2
@@ -88,6 +91,10 @@ if [ -z "$PY" ]; then
   echo "  both if missing) — skip it if a hook with this exact command is already there:" >&2
   echo >&2
   echo "  $SNIPPET_ONE_LINE" >&2
+  echo >&2
+  echo "  And this one under \"hooks\".\"Stop\" (blocks ending a session while a T3/T4 change fails compliance):" >&2
+  echo >&2
+  echo "  $STOP_SNIPPET_ONE_LINE" >&2
   echo >&2
   exit 2
 fi
@@ -116,7 +123,13 @@ if not isinstance(data, dict):
     sys.exit(1)
 
 hooks = data.setdefault("hooks", {})
+if not isinstance(hooks, dict):
+    print("PARSE_ERROR:\"hooks\" is not an object")
+    sys.exit(1)
 post = hooks.setdefault(event, [])
+if not isinstance(post, list):
+    print("PARSE_ERROR:\"hooks.%s\" is not a list" % event)
+    sys.exit(1)
 
 already = any(
     isinstance(entry, dict)
@@ -190,6 +203,8 @@ if [ -f "$STOP_SCRIPT" ]; then
       echo "  'ledger.sh compliance' (tools/hooks/stop-compliance.sh). It blocks at most once per stop,"
       echo "  fails open on anything it cannot establish, and PIPELINE_STOP_HOOK=off disables it."
       ;;
-    *) echo "Could not install the Stop hook: ${STOP_RESULT#PARSE_ERROR:}" >&2 ;;
+    *) echo "Could not install the Stop hook: ${STOP_RESULT#PARSE_ERROR:}" >&2
+       echo "  (the R0c reminder above is installed; add the Stop entry by hand: event \"Stop\", no matcher," >&2
+       echo "   command ${STOP_COMMAND}, timeout 180)" >&2 ;;
   esac
 fi

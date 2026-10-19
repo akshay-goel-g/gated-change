@@ -152,7 +152,7 @@ a surface you did not notice touching shows up anyway. The round number is what 
 two passes distinguishable in the ledger — same change, different commit, different verdict.
 
 **On Claude Code, this no longer has to rely on remembering.** `tools/install-claude-hook.sh`
-wires a `PostToolUse` hook that fires on every `Edit`/`Write`/`MultiEdit`, checks the file
+wires a `PostToolUse` hook (and a `Stop` hook, see `05-enforcement.md` §4) that fires on every `Edit`/`Write`/`MultiEdit`, checks the file
 against these same T3/T4 rows, and reminds when it matches — see `05-enforcement.md` §4.
 
 ---

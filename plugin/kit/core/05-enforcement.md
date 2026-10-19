@@ -113,8 +113,8 @@ then returns `{"decision":"block","reason":...}` with the unmet gates. It blocks
 stop (it allows when Claude Code reports `stop_hook_active`), at most `PIPELINE_STOP_MAX_ATTEMPTS`
 (3) times for an unchanged state (HEAD, working tree, ledger), and it fails **open** on anything it
 cannot establish (no ledger, no route, no git, a compliance fault or timeout).
-`PIPELINE_STOP_HOOK=off` disables it. Claude Code also caps consecutive Stop continuations itself.
-Compliance takes 35-95s on a large ledger, so it is registered with a 180s timeout.
+`PIPELINE_STOP_HOOK=off` disables it; to remove either hook delete its entry from `.claude/settings.json` (the installer adds it back if you run it again). The "active change" is the ledger's last `route` record: a later route for an unrelated change replaces it, and a change name with a quote or backslash disarms the hook. Claude Code also caps consecutive Stop continuations itself.
+Compliance takes roughly 45s even on a small ledger and up to 95s on a large one (Git Bash on Windows), and it re-runs on each stop the hook is allowed to block, so it is registered with a 180s timeout.
 
 ---
 

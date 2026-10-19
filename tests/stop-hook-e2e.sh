@@ -98,5 +98,45 @@ assert len(post) == 1 and len(stop) == 1 and stop[0].get("timeout", 0) >= 120
 PYEOF
 else echo "  SKIP  no python: installer wiring not checked"; fi
 
+# 10. a hostile change name in the ledger never becomes a pasteable shell command in the block reason
+newrepo
+led route --change 'a$(touch PWNED)b`id`' --predicted T4 --actual T4 --reason "hostile name"
+OUT="$(hook)"
+case "$OUT" in *'"decision":"block"'*) ok "hostile change name: still blocks";; *) bad "hostile change name: still blocks" "$OUT";; esac
+case "$OUT" in *'$(touch'*|*'`id`'*) bad "hostile change name: no shell syntax reaches the reason" "$OUT";; *) ok "hostile change name: no shell syntax reaches the reason";; esac
+case "$OUT" in *'compliance --change'*) bad "hostile change name: no pasteable command for it" "$OUT";; *) ok "hostile change name: no pasteable command for it";; esac
+[ ! -e "$R/PWNED" ] && ok "hostile change name: nothing was executed" || bad "hostile change name: nothing was executed"
+
+# 11. installer: a malformed Stop section is reported with a reason, not swallowed
+if [ -n "$PY" ]; then
+  newrepo
+  printf 'T4::(^|/)auth/::auth\n' > "$R/project/surfaces.conf"
+  mkdir -p "$R/.claude"; printf '{"hooks":{"Stop":{"a":1}}}\n' > "$R/.claude/settings.json"
+  ERR="$( cd "$R" && bash tools/install-claude-hook.sh 2>&1 >/dev/null )"
+  case "$ERR" in *"Could not install the Stop hook"*"not a list"*) ok "installer: malformed Stop section is reported with its reason";; *) bad "installer: malformed Stop section" "$ERR";; esac
+fi
+
+# 12. the block tells the agent the verify gates need a fresh review (no self-grading)
+newrepo
+led route --change selfgrade --predicted T4 --actual T4 --reason "x"
+OUT="$(hook)"
+case "$OUT" in *"FRESH-context"*"core/cards"*) ok "block reason points at fresh-context gate runs and the cards";; *) bad "block reason names fresh-context runs and the cards" "$OUT";; esac
+
+# 13. a carriage return (or other control character) in compliance's output still yields valid JSON
+newrepo
+led route --change crtest --predicted T4 --actual T4 --reason "x"
+printf '#!/usr/bin/env bash\nprintf "INCOMPLETE a\\rb\\r\\n\\ttab \\"q\\" back\\\\slash\\001ctl\\n"\nexit 1\n' > "$R/tools/ledger.sh"
+OUT="$(hook)"
+if [ -n "$PY" ]; then
+  printf '%s' "$OUT" | "$PY" -c "import json,sys; d=json.load(sys.stdin); assert d['decision']=='block' and 'back' in d['reason']" 2>/dev/null \
+    && ok "CR, tab, quote, backslash and control characters: valid JSON" || bad "control characters: valid JSON" "$OUT"
+else echo "  SKIP  no python"; fi
+
+# 14. a T3 route arms it too, and a name with a space is shown without a pasteable command
+newrepo
+led route --change "has space" --predicted T3 --actual T3 --reason "x"
+OUT="$(hook)"
+case "$OUT" in *'"decision":"block"'*"T3"*) ok "T3 route: blocks";; *) bad "T3 route: blocks" "$OUT";; esac
+
 echo; printf 'passed %s . failed %s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
