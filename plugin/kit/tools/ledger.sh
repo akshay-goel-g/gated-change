@@ -27,7 +27,7 @@
 #   ledger.sh compliance --change <name> --tier T4 [--round N]
 #            Did the gates this tier MANDATES actually pass? Exits 1 if not.
 #            The one check that is not self-graded — "skipped" is not "passed".
-#   ledger.sh verify [--expect-head <hash>] [--against <git rev>]
+#   ledger.sh verify [--allow-joins] [--expect-head <hash>] [--against <git rev>]
 #            Every record carries "prev", the sha256 of the line before it. Verifies the chain: a line
 #            edited, deleted, inserted or reordered in place breaks it (exit 1). --expect-head pins the last
 #            record; --against <rev> requires the ledger committed in <rev> to be an exact prefix of this one.
@@ -312,6 +312,25 @@ refuse_branchy_change() {
   exit 2
 }
 
+# The chain makes every write read the last line and then append, so two writers at once (parallel fresh-context
+# gate reviewers logging to one ledger is a normal shape) would link to the same predecessor and leave a break
+# that can never be repaired. The read-hash-append is serialised with an atomic directory lock next to the ledger.
+# A lock older than two minutes is a crashed writer's and is broken.
+ledger_unlock() { rmdir "$LEDGER.lock" 2>/dev/null; return 0; }
+ledger_lock() {
+  local tries=0
+  while ! mkdir "$LEDGER.lock" 2>/dev/null; do
+    tries=$((tries + 1))
+    if [ -n "$(find "$LEDGER.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rmdir "$LEDGER.lock" 2>/dev/null; continue; fi
+    if [ "$tries" -gt 600 ]; then
+      echo "REFUSED: could not take the ledger write lock $LEDGER.lock in 60s (another writer is stuck?). Nothing was written." >&2
+      exit 3
+    fi
+    sleep 0.1 2>/dev/null || sleep 1
+  done
+  trap ledger_unlock EXIT
+}
+
 # ledger_line_hash: sha256 (hex) of stdin, which is one ledger line with its newline. CR is removed first so a
 # checkout that rewrote line endings does not look like tampering.
 ledger_line_hash() { tr -d '\r' | _matrix_hash; }
@@ -371,6 +390,7 @@ emit() {
     echo "  accepts the append and silently discards every record written to it." >&2
     echo "  Nothing was written." >&2
     exit 3; }
+  ledger_lock
   # A ledger that does not end in a newline (a truncated last write, a merge resolved by hand and saved
   # without one) would have this record glued onto that last line: one physical line, two records. Every
   # consumer ranks by line, so a FAIL glued behind a PASS never counted as "after" it and compliance exited 0
@@ -397,6 +417,7 @@ emit() {
     echo "  file before the failure, a truncated line is now sitting in $LEDGER;" >&2
     echo "  check it by hand before trusting anything appended after this point." >&2
     exit 3; }
+  ledger_unlock; trap - EXIT
   # The destination is named HERE, at the one place that actually writes —
   # not re-typed at every caller (G4 Ripple, this change's own review: five
   # call sites each hand-appending "-> $LEDGER" is an enumerated list a sixth
@@ -2545,16 +2566,19 @@ cmd_report() {
 # A record with a "prev" is chained; it must link to the hash of the record before it (64 zeros for the first):
 #   linked  matches.
 #   JOIN    two branches appended to the same tail and were concatenated (the README's parallel-branch merge):
-#           record N links to record K < N-1, AND records K+1..N-1 are themselves an unbroken chain starting at K.
-#           That shape is a fork at K, not a forgery: a forged or edited record cannot produce it without also
-#           producing a valid continuous segment. A note, exit 0.
+#           record N links to record K < N-1, AND records K+1..N-1 are themselves an unbroken chain starting at K
+#           (a JOIN start counts, so three or more branches work). A forged record can take exactly this shape:
+#           a record inserted with a correct link to its predecessor is a one-record "branch". So a JOIN is a
+#           BREAK unless --allow-joins says "I merged branches"; with it, a JOIN is a note.
 #   BREAK   anything else: the record, or one before it, was edited, deleted, inserted or reordered.
 # A record with no "prev" is legacy (written before the chain) only while no chained record has been seen; after
 # that it is a BREAK.
 #
 # What it does NOT prove, and how to close each hole:
-#   - One side of a JOIN. Removing the whole run of records on one side of a fork leaves a valid chain (it looks like
-#     the other branch was never merged). Git history (--against) is the only anchor for that.
+#   - One side of a JOIN, and its mirror image. Removing the whole run of records on one side of a fork leaves a valid
+#     chain (it looks like the other branch was never merged); and a record inserted in the middle WITH a correct link
+#     to its predecessor reads as a one-record branch that was merged there. Git history (--against) is the only
+#     anchor for either.
 #   - Appends. Anyone can append a well-linked record (a chain authenticates order, not authors), and a forged
 #     record added at the TAIL reads as a legitimate append or a JOIN. (A byte-for-byte copy of an existing record
 #     is caught: two chained records with the same hash are a BREAK, since real records carry timestamps.) It detects an edit, a deletion, a
@@ -2565,9 +2589,10 @@ cmd_report() {
 #     --against <rev> requires the ledger as committed in <rev> to be an exact byte prefix of this one, so git history
 #     is the anchor: it catches a stripped, edited or truncated COMMITTED record.
 cmd_verify() {
-  local expect_head="" against=""
+  local expect_head="" against="" allow_joins=0
   while [ $# -gt 0 ]; do
     case "$1" in
+      --allow-joins) allow_joins=1; shift;;
       --expect-head) _val "$1" "$#" "${2-}"; expect_head="$2"; shift 2
                      case "$expect_head" in
                        ''|*[!0-9a-f]*) echo "REFUSED: --expect-head needs the lower-case hex hash that verify printed (an empty or unset CI variable would silently pin nothing)." >&2; exit 2;;
@@ -2576,7 +2601,7 @@ cmd_verify() {
                      case "$against" in
                        ''|-*) echo "REFUSED: --against needs a git revision (not empty, not starting with '-')." >&2; exit 2;;
                      esac;;
-      *) echo "unknown option: $1 (usage: ledger.sh verify [--expect-head <hash>] [--against <git rev>])" >&2; exit 2;;
+      *) echo "unknown option: $1 (usage: ledger.sh verify [--allow-joins] [--expect-head <hash>] [--against <git rev>])" >&2; exit 2;;
     esac
   done
   local tmp; tmp="$(mktemp -d)" || { echo "REFUSED: cannot create a temp directory." >&2; exit 2; }
@@ -2614,17 +2639,25 @@ cmd_verify() {
   fi
 
   local breaks=0
-  { printf '%s\n' "$sums" | awk 'NF { f = $2; sub(/^\*/, "", f); print "H", f + 0, $1 }'; cat "$tmp/p.txt"; } | awk -v zeros="$(printf '%064d' 0)" -v expect="$expect_head" '
+  { printf '%s\n' "$sums" | awk 'NF { f = $2; sub(/^\*/, "", f); print "H", f + 0, $1 }'; cat "$tmp/p.txt"; } | awk -v zeros="$(printf '%064d' 0)" -v expect="$expect_head" -v allow="$allow_joins" '
     $1 == "H" { hash[$2] = $3; if (!($3 in first)) first[$3] = $2; if ($2 + 0 > n) n = $2 + 0 }
     $1 == "P" { prev[$2] = $3 }
     $1 == "C" { conflict[$2] = 1 }
-    $1 == "C" { conflict[$2] = 1 }
     END {
       chained = 0; legacy = 0; ok = 0; joins = 0; breaks = 0; started = 0; nl[0] = 0
+      # nl[i] counts records up to i that are neither linked to their predecessor nor the start of a valid fork
+      # (a JOIN). A JOIN start is "good" for the continuity test of a LATER join, so three or more branches that
+      # forked from the same record concatenate cleanly.
       for (i = 1; i <= n; i++) {
         want = (i == 1 ? zeros : hash[i - 1])
-        linked = (prev[i] != "-" && prev[i] == want)
-        nl[i] = nl[i - 1] + (linked ? 0 : 1)
+        good = (prev[i] != "-" && (prev[i] "") == (want ""))
+        if (!good && prev[i] != "-") {
+          k = -1
+          if ((prev[i] "") == ("" zeros)) k = 0
+          else if (prev[i] in first) k = first[prev[i]] + 0
+          if (k >= 0 && k < i - 1 && nl[i - 1] - nl[k] == 0) good = 1
+        }
+        nl[i] = nl[i - 1] + (good ? 0 : 1)
       }
       for (i = 1; i <= n; i++) {
         if (prev[i] == "-") {
@@ -2637,17 +2670,20 @@ cmd_verify() {
         if (hash[i] in seenc) { breaks++; printf "  BREAK  record %d is an exact copy of record %d (a replayed or duplicated record)\n", i, seenc[hash[i]]; continue }
         seenc[hash[i]] = i
         want = (i == 1 ? zeros : hash[i - 1])
-        if (prev[i] == want) { ok++; continue }
+        if ((prev[i] "") == (want "")) { ok++; continue }
         k = -1
-        if (prev[i] == zeros) k = 0
+        if ((prev[i] "") == ("" zeros)) k = 0
         else if (prev[i] in first) k = first[prev[i]] + 0
-        if (k >= 0 && k < i - 1 && nl[i - 1] - nl[k] == 0) { joins++; printf "  JOIN   record %d links to record %d, not %d (two branches concatenated; records %d-%d are an unbroken chain from %d)\n", i, k, i - 1, k + 1, i - 1, k }
+        if (k >= 0 && k < i - 1 && nl[i - 1] - nl[k] == 0) {
+          if (allow + 0 == 1) { joins++; printf "  JOIN   record %d links to record %d, not %d (two branches concatenated; records %d-%d are an unbroken chain from %d)\n", i, k, i - 1, k + 1, i - 1, k }
+          else { breaks++; printf "  BREAK  record %d links to record %d, not %d: the shape of a merge of two branches, which is also the shape of a record inserted with a correct link. If you merged branches, verify with --allow-joins\n", i, k, i - 1 }
+        }
         else { breaks++; printf "  BREAK  record %d: \"prev\" fits no fork point: the damage is at record %d or at the record before it (edited, deleted, inserted or reordered)\n", i, i }
       }
       head = (n > 0 ? hash[n] : zeros)
       printf "ledger: %d record(s): %d legacy (before the chain), %d chained (%d linked, %d join(s), %d break(s))\n", n, legacy, chained, ok, joins, breaks
       printf "chain head: %s (record %d)\n", head, n
-      if (expect != "" && expect != head) { breaks++; printf "  BREAK  chain head does not match --expect-head %s (tail rewritten or truncated)\n", expect }
+      if (("" expect) != "" && ("" expect) != ("" head)) { breaks++; printf "  BREAK  chain head does not match --expect-head %s (tail rewritten or truncated)\n", expect }
       exit (breaks > 0 ? 1 : 0)
     }' || breaks=1
 
@@ -2683,7 +2719,9 @@ case "${1:-}" in
   report)     shift; cmd_report "$@";;
   gates)      shift; cmd_gates "$@";;
   compliance) shift; require_ledger; cmd_compliance "$@";;
-  verify)     shift; require_ledger; cmd_verify "$@";;
+  verify)     shift
+              if [ -f "$LEDGER" ] && [ ! -s "$LEDGER" ]; then echo "Ledger at $LEDGER is empty: nothing to verify."; exit 0; fi
+              require_ledger; cmd_verify "$@";;
   # Bare invocation (no subcommand at all) prints the header as usage — that is
   # a real help request. A TYPO'D subcommand is not: G8 Dogfood round 1 found
   # that `ledger.sh ad` (for `add`) silently dumped the same 34-line header to

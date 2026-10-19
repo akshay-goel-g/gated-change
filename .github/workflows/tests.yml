@@ -52,7 +52,7 @@ jobs:
 
       - name: Ledger chain
         shell: bash
-        run: bash tools/ledger.sh verify
+        run: bash tools/ledger.sh verify --allow-joins
 
       - name: Stop-hook tests
         shell: bash

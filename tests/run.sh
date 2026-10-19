@@ -8407,6 +8407,9 @@ test_c3_two_branches_concatenated_are_a_join_not_a_break() {
   cp "$f.fork" "$f"; c3_route 4
   printf '%s\n' "$a_tail" >> "$f"          # branch B's line appended after branch A's: its prev points at line 2
   run led verify
+  assert_exit 1 "strict by default"
+  assert_contains "--allow-joins"
+  run led verify --allow-joins
   assert_exit 0
   assert_contains "JOIN"
   assert_contains "1 join(s)"
@@ -8450,7 +8453,8 @@ test_c3_a_two_line_branch_concatenated_is_still_a_join() {
   c3_route 3; c3_route 4; cp "$f" "$f.a"
   cp "$f.fork" "$f"; c3_route 5; c3_route 6
   tail -n 2 "$f" > "$f.b"; cat "$f.a" "$f.b" > "$f"
-  run led verify; assert_exit 0; assert_contains "1 join(s)"
+  run led verify; assert_exit 1 "strict by default: a join is also the shape of an inserted record"; assert_contains "--allow-joins"
+  run led verify --allow-joins; assert_exit 0; assert_contains "1 join(s)"
 }
 
 test_c3_stripping_every_prev_is_caught_only_against_git() {
@@ -8463,6 +8467,7 @@ test_c3_stripping_every_prev_is_caught_only_against_git() {
   run led verify --against HEAD; assert_exit 1 "committed history is the anchor"; assert_contains "NOT a prefix"
   git -C "$REPO" checkout -q -- "$f"
   run led verify --against HEAD; assert_exit 0; assert_contains "exact prefix"
+  assert_not_contains "unpinned and unanchored"
   c3_route 4
   run led verify --against HEAD; assert_exit 0 "new records after the commit are fine"
   sed -i '$d' "$f"; sed -i '$d' "$f"
@@ -8554,7 +8559,7 @@ test_c3_two_branches_that_both_started_from_an_empty_ledger_are_a_genesis_join()
   : > "$f"; c3_route 1; c3_route 2; cp "$f" "$f.a"
   : > "$f"; c3_route 3; c3_route 4; cp "$f" "$f.b"
   cat "$f.a" "$f.b" > "$f"
-  run led verify
+  run led verify --allow-joins
   assert_exit 0 "both lines of descent start at the zero hash"
   assert_contains "JOIN"
 }
@@ -8566,6 +8571,66 @@ test_c3_a_whitespace_only_line_is_blank_for_the_writer_and_the_verifier() {
   run led verify; assert_exit 0 "a whitespace-only line is not a record"; assert_contains "1 chained"
   c3_route 2
   run led verify; assert_exit 0 "and the writer chains onto the last real record"; assert_contains "2 chained (2 linked"
+}
+
+test_c3_parallel_writers_chain_correctly() {
+  newrepo
+  c3_route 0
+  local i
+  for i in 1 2 3 4 5; do ( c3_route "p$i" ) & done
+  wait
+  run led verify
+  assert_exit 0 "six writers, one ledger: the lock keeps the chain intact"
+  assert_contains "6 chained (6 linked, 0 join(s), 0 break(s))"
+  [ ! -d "$(ledger_path).lock" ] && _ok || _fail "the lock directory was left behind"
+}
+
+test_c3_a_stale_lock_from_a_crashed_writer_is_broken() {
+  newrepo
+  c3_route 1
+  mkdir "$(ledger_path).lock"
+  touch -d '10 minutes ago' "$(ledger_path).lock" 2>/dev/null || touch -t 200001010000 "$(ledger_path).lock"
+  c3_route 2
+  run led verify
+  assert_exit 0
+  assert_contains "2 chained (2 linked"
+}
+
+test_c3_three_branches_forked_from_one_record_concatenate_cleanly() {
+  newrepo
+  local f; f="$(ledger_path)"
+  c3_route 0; cp "$f" "$f.base"
+  c3_route x1; c3_route x2; tail -n 2 "$f" > "$f.x"
+  cp "$f.base" "$f"; c3_route y1; c3_route y2; tail -n 2 "$f" > "$f.y"
+  cp "$f.base" "$f"; c3_route z1; c3_route z2; tail -n 2 "$f" > "$f.z"
+  cat "$f.base" "$f.x" "$f.y" "$f.z" > "$f"
+  run led verify --allow-joins
+  assert_exit 0 "a three-way merge is an ordinary event"
+  assert_contains "2 join(s)"
+}
+
+test_c3_a_record_inserted_with_a_correct_link_is_a_break_unless_joins_are_allowed() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  local f h2; f="$(ledger_path)"; cp "$f" "$f.good"
+  h2="$(sed -n 2p "$f" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  { sed -n 1,2p "$f.good"; printf '{"type":"forged","prev":"%s"}\n' "$h2"; sed -n 3p "$f.good"; } > "$f"
+  run led verify; assert_exit 1 "a forged record with a correct link, no hashing needed"; assert_contains "--allow-joins"
+  run led verify --allow-joins; assert_exit 0 "DOCUMENTED LIMIT: with joins allowed it reads as a one-record branch"
+}
+
+test_c3_a_numeric_looking_prev_is_not_equal_to_the_zero_hash() {
+  newrepo
+  printf '{"type":"x","prev":"0"}\n' > "$(ledger_path)"
+  run led verify; assert_exit 1 "prev 0 is not 64 zeros"
+}
+
+test_c3_an_empty_ledger_has_nothing_to_verify() {
+  newrepo
+  : > "$(ledger_path)"
+  run led verify; assert_exit 0; assert_contains "nothing to verify"
+  rm -f "$(ledger_path)"
+  run led verify; assert_exit 1 "a missing ledger is still an error"
 }
 
 test_c3_verify_refuses_unknown_options() {
