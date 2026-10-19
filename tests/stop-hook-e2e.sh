@@ -138,5 +138,33 @@ led route --change "has space" --predicted T3 --actual T3 --reason "x"
 OUT="$(hook)"
 case "$OUT" in *'"decision":"block"'*"T3"*) ok "T3 route: blocks";; *) bad "T3 route: blocks" "$OUT";; esac
 
+# 15. a compliance TOOL FAULT (exit 2) must not block: the hook never blocks on its own failure
+newrepo
+led route --change faulty --predicted T4 --actual T4 --reason "x"
+printf '#!/usr/bin/env bash\necho "usage error"\nexit 2\n' > "$R/tools/ledger.sh"
+OUT="$(hook)"; [ -z "$OUT" ] && ok "compliance exit 2 (a fault): fails open" || bad "compliance exit 2: fails open" "$OUT"
+printf '#!/usr/bin/env bash\necho "weird"\nexit 7\n' > "$R/tools/ledger.sh"
+OUT="$(hook)"; [ -z "$OUT" ] && ok "compliance exit 7: fails open" || bad "compliance exit 7: fails open" "$OUT"
+
+# 16. every input of the cap's fingerprint re-arms a capped hook: a new commit, a ledger append, a tree edit
+newrepo
+led route --change rearm --predicted T4 --actual T4 --reason "x"
+printf '#!/usr/bin/env bash\necho INCOMPLETE\nexit 1\n' > "$R/tools/ledger.sh"
+git -C "$R" add -A >/dev/null 2>&1; git -C "$R" commit -qm stub >/dev/null 2>&1
+M=PIPELINE_STOP_MAX_ATTEMPTS=1
+A="$(hook '' $M)"; B="$(hook '' $M)"
+if [ -n "$A" ] && [ -z "$B" ]; then ok "fingerprint: capped after one block"; else bad "fingerprint: capped after one block" "A:${#A} B:${#B}"; fi
+git -C "$R" commit -q --allow-empty -m "progress" >/dev/null 2>&1
+C="$(hook '' $M)"; [ -n "$C" ] && ok "fingerprint: a new commit re-arms" || bad "fingerprint: a new commit re-arms"
+D="$(hook '' $M)"; [ -z "$D" ] || bad "fingerprint: capped again" "$D"
+printf '{"type":"note"}\n' >> "$R/ledger.jsonl"
+E="$(hook '' $M)"; [ -n "$E" ] && ok "fingerprint: a ledger append re-arms" || bad "fingerprint: a ledger append re-arms"
+
+# 17. the spaced stop_hook_active form is honoured, and false does not suppress the block
+newrepo
+led route --change spaced --predicted T4 --actual T4 --reason "x"
+OUT="$(hook '{"stop_hook_active": true}')"; [ -z "$OUT" ] && ok "stop_hook_active (spaced form): allows" || bad "stop_hook_active spaced form" "$OUT"
+OUT="$(hook '{"stop_hook_active":false}')"; case "$OUT" in *'"decision":"block"'*) ok "stop_hook_active false: still blocks";; *) bad "stop_hook_active false" "$OUT";; esac
+
 echo; printf 'passed %s . failed %s\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

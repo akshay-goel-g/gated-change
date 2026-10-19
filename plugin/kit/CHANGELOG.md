@@ -41,7 +41,8 @@ redesigns, recorded in `ledger.jsonl`.
   a finding with a location (an `info` finding is the form for "checked, holds"), `--evidence file:line`, or
   `--evidence-cmd EVIDENCE::<name>`, which runs a line declared in `project/commands.conf`, records the exit code, a
   sha256 of the output and a sha256 of the conf line, and refuses a `pass` when the command fails or the line is `MANUAL`.
-  `project/commands.conf` is now a T4 surface. Write-time only: older lines are not re-judged, and a hand-edited ledger
+  `project/commands.conf` is a T4 surface in this repository (the shipped `templates/project/surfaces.conf` carries the row commented
+  out: `<kit>/project/` is the adopter's own, so an active row would list the install commit as unrouted T4 work). Write-time only: older lines are not re-judged, and a hand-edited ledger
   still bypasses it (ACTION-PLAN C3). A citation must name an existing file and a line within it; an untiered fresh pass
   is held to the same rule; an `EVIDENCE::` command must print something and `commands.conf` must be committed.
   Known limits (accepted, ACTION-PLAN C3 and later): a citation proves a real file and line exist, not that they are relevant,
@@ -49,7 +50,7 @@ redesigns, recorded in `ledger.jsonl`.
   (`tests/run.sh` and the like) may be uncommitted when it runs; the hash is of the output with trailing newlines trimmed.
   Existing installs keep their own `project/commands.conf` (no `EVIDENCE::` lines) until they add some.
   **Action required (existing installs):** `update-kit` does not touch `project/`. To use `--evidence-cmd`, add `EVIDENCE::<name>::<command>`
-  lines to your `project/commands.conf` and commit it; to make that file a T4 surface, add
+  lines to your `project/commands.conf` and commit it; to make that file a T4 surface (optional; uncomment the row in the shipped template), add
   `T4::(^|/)project/commands\.conf$::What a gate may run as evidence` to your `project/surfaces.conf`. `--evidence file:line`
   and `info` findings work without either. Gate runs of a fresh T3/T4 pass that cite nothing are now refused: update any script that logs one.
 
