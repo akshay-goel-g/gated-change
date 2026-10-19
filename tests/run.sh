@@ -8432,10 +8432,15 @@ test_c3_a_forged_or_edited_record_cannot_pass_as_a_join() {
   cp "$f.good" "$f"; sed -i '3s/chain test 3/EVIL/' "$f"
   sed -i -E "4s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/;5s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/" "$f"
   run led verify; assert_exit 1 "an edit with cheap prev rewrites"; assert_contains "BREAK"
-  # DOCUMENTED LIMIT: a chain authenticates order, not authors. A verbatim copy of an earlier record appended at the
-  # tail reads as a join (a note), exactly as a legitimately appended record would. Pin the head to catch it.
+  # A byte-for-byte copy of an existing record has the same hash, so it is a BREAK wherever it sits.
   cp "$f.good" "$f"; sed -n 2p "$f.good" >> "$f"
-  run led verify; assert_exit 0 "an appended copy is not detectable by the chain alone"; assert_contains "JOIN"
+  run led verify; assert_exit 1 "a copy appended at the tail"; assert_contains "exact copy of record 2"
+  cp "$f.good" "$f"; sed -n 2p "$f.good" > "$f.dup"
+  { sed -n 1,2p "$f.good"; cat "$f.dup"; sed -n '3,$p' "$f.good"; } > "$f"
+  run led verify; assert_exit 1 "a copy inserted right after the original"; assert_contains "exact copy"
+  # DOCUMENTED LIMIT: a FORGED (not copied) record appended at the tail is a normal append to the chain.
+  cp "$f.good" "$f"; c3_route 6
+  run led verify; assert_exit 0
 }
 
 test_c3_a_two_line_branch_concatenated_is_still_a_join() {
@@ -8511,6 +8516,56 @@ test_c3_a_record_written_after_a_crlf_conversion_still_chains() {
   run led verify
   assert_exit 0 "the writer must hash the CRLF last line the way verify does"
   assert_contains "3 chained (3 linked"
+}
+
+test_c3_an_empty_pin_a_dash_revision_and_a_plain_ok_notice() {
+  newrepo
+  c3_route 1; c3_route 2
+  run led verify --expect-head ""; assert_exit 2 "an unset CI variable must not pin nothing"; assert_contains "REFUSED"
+  run led verify --expect-head "NOTHEX"; assert_exit 2
+  run led verify --against "--output=PWNED"; assert_exit 2
+  run led verify --against ""; assert_exit 2
+  [ ! -e "$REPO/PWNED" ] && _ok || _fail "an option reached git"
+  run led verify; assert_exit 0; assert_contains "unpinned and unanchored"
+  local head; head="$(c3_head)"
+  run led verify --expect-head "$head"; assert_exit 0; assert_not_contains "unpinned and unanchored"
+}
+
+test_c3_a_ledger_of_only_blank_lines_has_no_records() {
+  newrepo
+  printf '\n  \n\t\n' > "$(ledger_path)"
+  run led verify
+  assert_exit 0
+  assert_contains "0 record(s)"
+  assert_not_contains "1 chained"
+}
+
+test_c3_a_git_conflict_marker_is_named_as_one() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"
+  { sed -n 1p "$f"; echo '<<<<<<< HEAD'; sed -n 2p "$f"; echo '======='; echo '>>>>>>> other'; } > "$f.m"; cp "$f.m" "$f"
+  run led verify; assert_exit 1; assert_contains "git conflict marker"
+}
+
+test_c3_two_branches_that_both_started_from_an_empty_ledger_are_a_genesis_join() {
+  newrepo
+  local f; f="$(ledger_path)"
+  : > "$f"; c3_route 1; c3_route 2; cp "$f" "$f.a"
+  : > "$f"; c3_route 3; c3_route 4; cp "$f" "$f.b"
+  cat "$f.a" "$f.b" > "$f"
+  run led verify
+  assert_exit 0 "both lines of descent start at the zero hash"
+  assert_contains "JOIN"
+}
+
+test_c3_a_whitespace_only_line_is_blank_for_the_writer_and_the_verifier() {
+  newrepo
+  c3_route 1
+  printf '   \t \n' >> "$(ledger_path)"
+  run led verify; assert_exit 0 "a whitespace-only line is not a record"; assert_contains "1 chained"
+  c3_route 2
+  run led verify; assert_exit 0 "and the writer chains onto the last real record"; assert_contains "2 chained (2 linked"
 }
 
 test_c3_verify_refuses_unknown_options() {

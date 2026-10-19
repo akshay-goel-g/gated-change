@@ -320,7 +320,7 @@ ledger_line_hash() { tr -d '\r' | _matrix_hash; }
 # an editor must not become part of the chain), or 64 zeros when there is none. Fails when no hash tool exists.
 ledger_prev_hash() {
   local last
-  last="$(tr -d '\r' < "$LEDGER" 2>/dev/null | awk 'NF { l = $0 } END { print l }')"
+  last="$(tr -d '\r' < "$LEDGER" 2>/dev/null | awk '$0 !~ /^[[:space:]]*$/ { l = $0 } END { print l }')"
   if [ -n "$last" ]; then
     printf '%s\n' "$last" | ledger_line_hash
   else
@@ -2553,8 +2553,11 @@ cmd_report() {
 # that it is a BREAK.
 #
 # What it does NOT prove, and how to close each hole:
-#   - Appends. Anyone can append a well-linked record (a chain authenticates order, not authors), and a copy or a
-#     forged record added at the TAIL reads as a legitimate append or a JOIN. It detects an edit, a deletion, a
+#   - One side of a JOIN. Removing the whole run of records on one side of a fork leaves a valid chain (it looks like
+#     the other branch was never merged). Git history (--against) is the only anchor for that.
+#   - Appends. Anyone can append a well-linked record (a chain authenticates order, not authors), and a forged
+#     record added at the TAIL reads as a legitimate append or a JOIN. (A byte-for-byte copy of an existing record
+#     is caught: two chained records with the same hash are a BREAK, since real records carry timestamps.) It detects an edit, a deletion, a
 #     reordering or an insertion in the MIDDLE of what was already there.
 #   - The tail: an edit of the last record, or a truncation, leaves a valid chain. --expect-head <hash> pins the
 #     printed head.
@@ -2565,37 +2568,57 @@ cmd_verify() {
   local expect_head="" against=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --expect-head) _val "$1" "$#" "${2-}"; expect_head="$2"; shift 2;;
-      --against)     _val "$1" "$#" "${2-}"; against="$2"; shift 2;;
-      *) echo "unknown option: $1" >&2; exit 2;;
+      --expect-head) _val "$1" "$#" "${2-}"; expect_head="$2"; shift 2
+                     case "$expect_head" in
+                       ''|*[!0-9a-f]*) echo "REFUSED: --expect-head needs the lower-case hex hash that verify printed (an empty or unset CI variable would silently pin nothing)." >&2; exit 2;;
+                     esac;;
+      --against)     _val "$1" "$#" "${2-}"; against="$2"; shift 2
+                     case "$against" in
+                       ''|-*) echo "REFUSED: --against needs a git revision (not empty, not starting with '-')." >&2; exit 2;;
+                     esac;;
+      *) echo "unknown option: $1 (usage: ledger.sh verify [--expect-head <hash>] [--against <git rev>])" >&2; exit 2;;
     esac
   done
   local tmp; tmp="$(mktemp -d)" || { echo "REFUSED: cannot create a temp directory." >&2; exit 2; }
-  trap 'rm -rf "$tmp"' EXIT INT TERM
+  # EXIT cleans up; INT and TERM must also END the run (a handler that returns lets the script carry on to an OK).
+  trap 'rm -rf "$tmp"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   mkdir "$tmp/l"
   awk -v d="$tmp/l" -v pf="$tmp/p.txt" '
-    { gsub(/\r/, ""); if ($0 ~ /^[ \t]*$/) next
+    { gsub(/\r/, ""); if ($0 ~ /^[[:space:]]*$/) next
       n++; f = sprintf("%s/%08d", d, n); print > f; close(f)
       prev = "-"
       if (match($0, /,"prev":"[0-9a-f]+"\}[ \t]*$/)) { prev = substr($0, RSTART + 9, RLENGTH - 9); sub(/"\}[ \t]*$/, "", prev) }
-      print "P", n, prev > pf }
+      print "P", n, prev > pf
+      if ($0 ~ /^(<<<<<<<|=======|>>>>>>>)/) print "C", n > pf }
     END { close(pf) }' < "$LEDGER" 2>/dev/null
   : >> "$tmp/p.txt"
-  local sums=""
-  if command -v sha256sum >/dev/null 2>&1; then sums="$(cd "$tmp/l" && ls | xargs sha256sum 2>/dev/null)"
-  elif command -v shasum >/dev/null 2>&1; then sums="$(cd "$tmp/l" && ls | xargs shasum -a 256 2>/dev/null)"
-  elif command -v openssl >/dev/null 2>&1; then
-    local f
-    for f in "$tmp"/l/*; do sums="${sums}$(openssl dgst -sha256 < "$f" 2>/dev/null | awk '{print $NF}')  $(basename "$f")
+  local sums="" nfiles
+  nfiles="$(ls "$tmp/l" 2>/dev/null | wc -l | tr -d ' ')"
+  # With no records there is nothing to hash. (GNU xargs without -r would run sha256sum once on EMPTY input and
+  # invent a record; BSD xargs would not. Never call it on an empty list.)
+  if [ "${nfiles:-0}" -gt 0 ]; then
+    if command -v sha256sum >/dev/null 2>&1; then sums="$(cd "$tmp/l" && ls | xargs sha256sum 2>/dev/null)"
+    elif command -v shasum >/dev/null 2>&1; then sums="$(cd "$tmp/l" && ls | xargs shasum -a 256 2>/dev/null)"
+    elif command -v openssl >/dev/null 2>&1; then
+      local f
+      for f in "$tmp"/l/*; do sums="${sums}$(openssl dgst -sha256 < "$f" 2>/dev/null | awk '{print $NF}')  $(basename "$f")
 "; done
+    fi
+    if [ -z "$sums" ]; then
+      echo "REFUSED: could not hash the ledger (no sha256sum, shasum or openssl found)." >&2; exit 2; fi
+    # Every record must have come back hashed, or an index would silently shift.
+    if [ "$(printf '%s\n' "$sums" | awk 'NF' | wc -l | tr -d ' ')" != "$nfiles" ]; then
+      echo "REFUSED: hashed $(printf '%s\n' "$sums" | awk 'NF' | wc -l | tr -d ' ') of $nfiles records; refusing to guess." >&2; exit 2; fi
   fi
-  if [ -z "$sums" ] && [ -n "$(ls "$tmp/l" 2>/dev/null)" ]; then
-    echo "REFUSED: could not hash the ledger (no sha256sum, shasum or openssl, or too many records for xargs)." >&2; exit 2; fi
 
   local breaks=0
-  { printf '%s\n' "$sums" | awk 'NF { print "H", NR, $1 }'; cat "$tmp/p.txt"; } | awk -v zeros="$(printf '%064d' 0)" -v expect="$expect_head" '
+  { printf '%s\n' "$sums" | awk 'NF { f = $2; sub(/^\*/, "", f); print "H", f + 0, $1 }'; cat "$tmp/p.txt"; } | awk -v zeros="$(printf '%064d' 0)" -v expect="$expect_head" '
     $1 == "H" { hash[$2] = $3; if (!($3 in first)) first[$3] = $2; if ($2 + 0 > n) n = $2 + 0 }
     $1 == "P" { prev[$2] = $3 }
+    $1 == "C" { conflict[$2] = 1 }
+    $1 == "C" { conflict[$2] = 1 }
     END {
       chained = 0; legacy = 0; ok = 0; joins = 0; breaks = 0; started = 0; nl[0] = 0
       for (i = 1; i <= n; i++) {
@@ -2605,18 +2628,21 @@ cmd_verify() {
       }
       for (i = 1; i <= n; i++) {
         if (prev[i] == "-") {
-          if (started) { breaks++; printf "  BREAK  record %d has no \"prev\" but follows chained records (inserted or hand-written)\n", i }
+          if (started && conflict[i]) { breaks++; printf "  BREAK  record %d is a git conflict marker: keep both sides'"'"' lines, delete the markers, then verify again\n", i }
+          else if (started) { breaks++; printf "  BREAK  record %d has no \"prev\" but follows chained records (inserted or hand-written)\n", i }
           else legacy++
           continue
         }
         started = 1; chained++
+        if (hash[i] in seenc) { breaks++; printf "  BREAK  record %d is an exact copy of record %d (a replayed or duplicated record)\n", i, seenc[hash[i]]; continue }
+        seenc[hash[i]] = i
         want = (i == 1 ? zeros : hash[i - 1])
         if (prev[i] == want) { ok++; continue }
         k = -1
         if (prev[i] == zeros) k = 0
         else if (prev[i] in first) k = first[prev[i]] + 0
         if (k >= 0 && k < i - 1 && nl[i - 1] - nl[k] == 0) { joins++; printf "  JOIN   record %d links to record %d, not %d (two branches concatenated; records %d-%d are an unbroken chain from %d)\n", i, k, i - 1, k + 1, i - 1, k }
-        else { breaks++; printf "  BREAK  record %d: \"prev\" fits no fork point (it, or a record before it, was edited, deleted, inserted or reordered)\n", i }
+        else { breaks++; printf "  BREAK  record %d: \"prev\" fits no fork point: the damage is at record %d or at the record before it (edited, deleted, inserted or reordered)\n", i, i }
       }
       head = (n > 0 ? hash[n] : zeros)
       printf "ledger: %d record(s): %d legacy (before the chain), %d chained (%d linked, %d join(s), %d break(s))\n", n, legacy, chained, ok, joins, breaks
@@ -2643,6 +2669,9 @@ cmd_verify() {
   if [ "$breaks" -ne 0 ]; then echo "VERIFY FAILED — see the BREAK line(s) above. To see what changed: git diff -- $LEDGER (or git log -p -- $LEDGER)" >&2; exit 1; fi
   if [ -n "$(tail -c 1 "$LEDGER" 2>/dev/null)" ]; then echo "  note: the last line has no newline (a truncated write); the next record starts a new line." >&2; fi
   echo "verify: OK"
+  if [ -z "$expect_head" ] && [ -z "$against" ]; then
+    echo "  (unpinned and unanchored: this does not detect an edited last record, a truncated tail, a ledger with every prev stripped, or the removal of one side of a JOIN. Use --expect-head <hash> and/or --against <rev>.)"
+  fi
   exit 0
 }
 
