@@ -8484,6 +8484,35 @@ test_c3_a_ledger_path_with_spaces_and_a_prevlike_note_verify() {
   assert_contains "2 chained (2 linked"
 }
 
+test_c3_a_reordered_pair_of_records_is_a_break() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4
+  local f; f="$(ledger_path)"
+  { sed -n 1p "$f"; sed -n 3p "$f"; sed -n 2p "$f"; sed -n 4p "$f"; } > "$f.swap"; cp "$f.swap" "$f"
+  run led verify; assert_exit 1; assert_contains "BREAK"
+}
+
+test_c3_a_matching_pinned_head_passes_and_a_stale_one_fails() {
+  newrepo
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  [ -n "$head" ] || _fail "no chain head was printed"
+  run led verify --expect-head "$head"; assert_exit 0 "the right pin passes"; assert_contains "verify: OK"
+  c3_route 3
+  run led verify --expect-head "$head"; assert_exit 1 "after a legitimate append the old pin is stale"
+  assert_contains "--expect-head"
+}
+
+test_c3_a_record_written_after_a_crlf_conversion_still_chains() {
+  newrepo
+  c3_route 1; c3_route 2
+  sed -i 's/$/\r/' "$(ledger_path)"
+  c3_route 3
+  run led verify
+  assert_exit 0 "the writer must hash the CRLF last line the way verify does"
+  assert_contains "3 chained (3 linked"
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1
