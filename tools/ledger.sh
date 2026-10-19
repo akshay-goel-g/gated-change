@@ -27,6 +27,9 @@
 #   ledger.sh compliance --change <name> --tier T4 [--round N]
 #            Did the gates this tier MANDATES actually pass? Exits 1 if not.
 #            The one check that is not self-graded — "skipped" is not "passed".
+#   ledger.sh verify [--expect-head <hash>]
+#            Every record carries "prev", the sha256 of the line before it. Verifies the chain: a line
+#            edited, deleted, inserted or reordered in place breaks it. Exits 1 on a break.
 #
 # Any subcommand also accepts --ledger <path> anywhere in its arguments,
 # taking precedence over the LEDGER env var. `LEDGER=path && ledger.sh ...`
@@ -308,6 +311,20 @@ refuse_branchy_change() {
   exit 2
 }
 
+# ledger_line_hash: sha256 (hex) of stdin, which is one ledger line with its newline. CR is removed first so a
+# checkout that rewrote line endings does not look like tampering.
+ledger_line_hash() { tr -d '\r' | _matrix_hash; }
+
+# ledger_prev_hash: the "prev" value for the next record: the hash of the last physical line, or 64 zeros when the
+# ledger is empty. Fails (non-zero) when no hash tool exists.
+ledger_prev_hash() {
+  if [ -s "$LEDGER" ]; then
+    tail -n 1 "$LEDGER" 2>/dev/null | ledger_line_hash
+  else
+    printf '%064d' 0
+  fi
+}
+
 # A line is appended only if it still looks like one JSON object. This is the last
 # gate before the record, and it is deliberately structural rather than clever: the
 # observed failure was a run whose findings collapsed to empty strings and wrote
@@ -360,6 +377,17 @@ emit() {
       echo "REFUSED: could not repair the missing final newline in $LEDGER. Nothing was written." >&2
       exit 3; }
     echo "  note: $LEDGER did not end in a newline (a truncated or hand-edited last line); this record starts a new line." >&2
+  fi
+  # The chain: "prev" is the sha256 of the previous physical line (CR removed, newline added), or 64 zeros for
+  # the first line. Added HERE, at the one place that writes, so no caller can forget it. Lines written before
+  # this existed carry no "prev"; `verify` treats them as the unchained prefix. If no hash tool exists the line is
+  # written unchained and says so -- the matrix reader needs one too, so this is a corner.
+  local prev
+  prev="$(ledger_prev_hash)" || prev=""
+  if [ -n "$prev" ]; then
+    line="${line%\}},\"prev\":\"$prev\"}"
+  else
+    echo "  warning: no sha256sum, shasum or openssl found; this record is written without a chain link." >&2
   fi
   printf '%s\n' "$line" >> "$LEDGER" || {
     echo "REFUSED: the write to $LEDGER failed (disk full, permission denied, or the" >&2
@@ -2507,6 +2535,89 @@ cmd_report() {
   echo "  this measures effectiveness."
 }
 
+
+# ---------------------------------------------------------------- verify (the hash chain)
+# Walks the ledger once. Hashes every line with ONE process: each line goes to its own file in a temp dir and
+# sha256sum/shasum is run over all of them, because a process per line takes minutes on Git Bash.
+#
+# For each line N with a "prev" (the chained part): prev must equal the hash of line N-1 (64 zeros for N=1).
+#   OK      matches
+#   JOIN    matches the hash of an EARLIER line K < N-1: two branches appended to the same tail and were
+#           concatenated (the README's parallel-branch merge). A note, not a failure.
+#   BREAK   matches no line in the file: this line, or one before it, was edited, deleted or reordered.
+# A line WITHOUT "prev" is legacy (written before the chain) while no chained line has been seen yet; after
+# the first chained line it is a BREAK (an inserted or hand-written line). The chain cannot stop someone
+# who recomputes every hash after the edit: pin the head (`--expect-head`, or the printed hash in a commit
+# message or CI log) to catch a rewritten or truncated tail.
+cmd_verify() {
+  local expect_head=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --expect-head) _val "$1" "$#" "${2-}"; expect_head="$2"; shift 2;;
+      *) echo "unknown option: $1" >&2; exit 2;;
+    esac
+  done
+  local tmp; tmp="$(mktemp -d)" || { echo "REFUSED: cannot create a temp directory." >&2; exit 2; }
+  # A temp dir of per-line files is the cheap way to hash N lines in one process.
+  awk -v d="$tmp" '{ gsub(/\r/, ""); f = sprintf("%s/%08d", d, NR); print > f; close(f) }' "$LEDGER" 2>/dev/null
+  local total; total="$(ls "$tmp" | wc -l | tr -d ' ')"
+  local sums
+  if command -v sha256sum >/dev/null 2>&1; then sums="$(cd "$tmp" && sha256sum -- * 2>/dev/null)"
+  elif command -v shasum >/dev/null 2>&1; then sums="$(cd "$tmp" && shasum -a 256 -- * 2>/dev/null)"
+  else
+    sums=""
+    local f
+    for f in "$tmp"/*; do
+      sums="${sums}$(openssl dgst -sha256 < "$f" 2>/dev/null | awk '{print $NF}')  $(basename "$f")
+"
+    done
+  fi
+  if [ -z "$sums" ]; then rm -rf "$tmp"; echo "REFUSED: no sha256sum, shasum or openssl found." >&2; exit 2; fi
+
+  local result
+  result="$(
+    printf '%s\n' "$sums" | awk '{ h[NR] = $1 } END { for (i = 1; i <= NR; i++) print "H", i, h[i] }'
+    awk '{
+      prev = ""
+      if (match($0, /,"prev":"[0-9a-f]+"\}[ \t]*$/)) {
+        prev = substr($0, RSTART + 9, RLENGTH - 9); sub(/"\}[ \t]*$/, "", prev)
+      }
+      print "P", NR, (prev == "" ? "-" : prev)
+    }' "$tmp"/* 2>/dev/null
+  )"
+  rm -rf "$tmp"
+
+  printf '%s\n' "$result" | awk -v zeros="$(printf '%064d' 0)" -v expect="$expect_head" '
+    $1 == "H" { hash[$2] = $3; byhash[$3] = (byhash[$3] == "" ? $2 : byhash[$3]); n = ($2 > n ? $2 : n) }
+    $1 == "P" { prev[$2] = $3 }
+    END {
+      chained = 0; legacy = 0; ok = 0; joins = 0; breaks = 0; started = 0
+      for (i = 1; i <= n; i++) {
+        if (prev[i] == "-") {
+          if (started) { breaks++; printf "  BREAK  line %d has no \"prev\" but follows chained lines (inserted or hand-written)\n", i }
+          else legacy++
+          continue
+        }
+        started = 1; chained++
+        want = (i == 1 ? zeros : hash[i - 1])
+        if (prev[i] == want) { ok++ }
+        else if (prev[i] in byhash && byhash[prev[i]] + 0 < i - 1) { joins++; printf "  JOIN   line %d links to line %d, not %d (two branches concatenated)\n", i, byhash[prev[i]], i - 1 }
+        else { breaks++; printf "  BREAK  line %d: \"prev\" matches no line (it, or a line before it, was edited, deleted or reordered)\n", i }
+      }
+      head = (n > 0 ? hash[n] : zeros)
+      printf "ledger: %d line(s): %d legacy (before the chain), %d chained", n, legacy, chained
+      printf " (%d linked, %d join(s), %d break(s))\n", ok, joins, breaks
+      printf "chain head: %s (line %d)\n", head, n
+      if (expect != "" && expect != head) { breaks++; printf "  BREAK  chain head %s does not match --expect-head %s (tail rewritten or truncated)\n", head, expect }
+      exit (breaks > 0 ? 1 : 0)
+    }'
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then echo "VERIFY FAILED — the ledger was changed in place. Compare with git: git log -p -- ${LEDGER}" >&2; exit 1; fi
+  if [ -n "$(tail -c 1 "$LEDGER" 2>/dev/null)" ]; then echo "  note: the last line has no newline (a truncated write); the next record starts a new line." >&2; fi
+  echo "verify: OK"
+  exit 0
+}
+
 case "${1:-}" in
   add)        shift; cmd_add "$@";;
   route)      shift; cmd_route "$@";;
@@ -2515,6 +2626,7 @@ case "${1:-}" in
   report)     shift; cmd_report "$@";;
   gates)      shift; cmd_gates "$@";;
   compliance) shift; require_ledger; cmd_compliance "$@";;
+  verify)     shift; require_ledger; cmd_verify "$@";;
   # Bare invocation (no subcommand at all) prints the header as usage — that is
   # a real help request. A TYPO'D subcommand is not: G8 Dogfood round 1 found
   # that `ledger.sh ad` (for `add`) silently dumped the same 34-line header to
@@ -2522,9 +2634,9 @@ case "${1:-}" in
   # the stderr convention every other refusal in this file follows. Naming what
   # was actually typed, on stderr, is the fix — the full header is still one
   # bare invocation away.
-  "") sed -n '3,36p' "$0"; exit 2;;
+  "") sed -n '3,39p' "$0"; exit 2;;
   *) echo "REFUSED: unknown subcommand '$1'." >&2
-     echo "  Usage: ledger.sh add|route|escape|assume|report|gates|compliance [options]" >&2
+     echo "  Usage: ledger.sh add|route|escape|assume|report|gates|compliance|verify [options]" >&2
      echo "  Run with no arguments to see the full header (options, examples)." >&2
      exit 2;;
 esac

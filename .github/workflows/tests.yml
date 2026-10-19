@@ -50,6 +50,10 @@ jobs:
         shell: bash
         run: bash tools/dashboard.sh --check
 
+      - name: Ledger chain
+        shell: bash
+        run: bash tools/ledger.sh verify
+
       - name: Stop-hook tests
         shell: bash
         run: bash tests/stop-hook-e2e.sh

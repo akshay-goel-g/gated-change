@@ -8351,6 +8351,82 @@ test_c1_a_real_file_outside_the_repository_is_not_citable() {
   rm -f "$REPO/../c1-sibling.txt"
 }
 
+# ================================================================ C3: the ledger hash chain
+c3_route() { led route --change c3 --predicted T2 --actual T2 --reason "chain test $1" >/dev/null 2>&1; }
+c3_head() { run led verify; printf '%s\n' "$LAST_OUT" | sed -n 's/^chain head: \([0-9a-f]*\) .*/\1/p'; }
+
+test_c3_every_record_links_to_the_hash_of_the_line_before() {
+  newrepo
+  c3_route 1; c3_route 2
+  local l1 l2 want
+  l1="$(sed -n 1p "$(ledger_path)")"; l2="$(sed -n 2p "$(ledger_path)")"
+  assert_file_contains "$(ledger_path)" '"prev":"0000000000000000000000000000000000000000000000000000000000000000"'
+  want="$(printf '%s\n' "$l1" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  case "$l2" in *"\"prev\":\"$want\"}") _ok;; *) _fail "line 2 does not carry the sha256 of line 1: $l2";; esac
+  assert_jsonl_valid "$(ledger_path)"
+}
+
+test_c3_verify_passes_an_untouched_chain_and_prints_the_head() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  run led verify
+  assert_exit 0
+  assert_contains "3 chained (3 linked, 0 join(s), 0 break(s))"
+  assert_contains "chain head: "
+  assert_contains "verify: OK"
+}
+
+test_c3_verify_catches_an_edit_a_deletion_and_an_insertion() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4
+  local f; f="$(ledger_path)"; cp "$f" "$f.good"
+  sed -i '2s/chain test 2/EDITED/' "$f"
+  run led verify; assert_exit 1 "an edited line"; assert_contains "BREAK  line 3"
+  cp "$f.good" "$f"; sed -i '2d' "$f"
+  run led verify; assert_exit 1 "a deleted line"; assert_contains "BREAK"
+  cp "$f.good" "$f"; sed -i '2a {"type":"note"}' "$f"
+  run led verify; assert_exit 1 "an inserted unchained line"; assert_contains "no \"prev\""
+}
+
+test_c3_a_legacy_prefix_is_fine_and_a_tail_truncation_needs_the_pinned_head() {
+  newrepo
+  printf '{"type":"note","n":1}\n{"type":"note","n":2}\n' > "$(ledger_path)"
+  run led verify; assert_exit 0 "legacy lines before any chained line are fine"; assert_contains "2 legacy"
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  sed -i '$d' "$(ledger_path)"
+  run led verify; assert_exit 0 "without a pinned head a truncated tail is invisible"
+  run led verify --expect-head "$head"; assert_exit 1; assert_contains "--expect-head"
+}
+
+test_c3_two_branches_concatenated_are_a_join_not_a_break() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"; cp "$f" "$f.fork"
+  c3_route 3; local a_tail; a_tail="$(tail -n 1 "$f")"
+  cp "$f.fork" "$f"; c3_route 4
+  printf '%s\n' "$a_tail" >> "$f"          # branch B's line appended after branch A's: its prev points at line 2
+  run led verify
+  assert_exit 0
+  assert_contains "JOIN"
+  assert_contains "1 join(s)"
+}
+
+test_c3_a_crlf_checkout_still_verifies() {
+  newrepo
+  c3_route 1; c3_route 2
+  sed -i 's/$/\r/' "$(ledger_path)"
+  run led verify
+  assert_exit 0 "line endings are not tampering"
+}
+
+test_c3_verify_refuses_unknown_options() {
+  newrepo
+  c3_route 1
+  run led verify --bogus
+  assert_exit 2
+}
+
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
   assert_file_contains "$KIT/project/surfaces.conf" 'project/commands\.conf$::'
   assert_file_contains "$KIT/templates/project/surfaces.conf" '# T4::(^|/)project/commands\.conf$::'

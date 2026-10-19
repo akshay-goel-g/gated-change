@@ -31,6 +31,11 @@ redesigns, recorded in `ledger.jsonl`.
 
 ### Added
 
+- **Ledger tamper-evidence (ACTION-PLAN C3).** Every new record ends with `"prev"`, the sha256 of the line before it, and
+  `ledger.sh verify` walks the chain: an edited, deleted or inserted line is a BREAK (exit 1), two branches concatenated
+  after a merge show as a JOIN (a note), older lines are the unchained prefix. A rewritten or truncated tail is only visible
+  against a pinned head: `verify --expect-head <hash>`. Nothing is required of existing ledgers; new records simply start
+  the chain. The chain does not stop someone who recomputes every hash, and the record's own `kit` field is still a CRC.
 - **Stop hook (ACTION-PLAN C2).** `install-claude-hook.sh` now also registers `tools/hooks/stop-compliance.sh` as a
   Claude Code `Stop` hook. When the ledger's latest route is T3/T4 and `ledger.sh compliance` for it fails, the session
   cannot end: the hook returns a block with the unmet gates. Once per stop (`stop_hook_active`), at most 3 times for an

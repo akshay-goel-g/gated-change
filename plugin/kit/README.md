@@ -807,6 +807,7 @@ checkout a `BASE` it contains.
 ### `ledger.sh` — record and report
 
 ```bash
+ledger.sh verify     [--expect-head <hash>]   # walks the per-line sha256 chain; exit 1 on an in-place edit, deletion or insertion
 ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>] \
                      [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>] \
                      --confidence fresh|low [--challenged true|false] [--model <name>] \
