@@ -4811,6 +4811,28 @@ test_r0c_hook_matches_relative_to_the_repo_root_not_to_where_the_repo_lives() {
   REPO="$saved"
 }
 
+# From the B2 gate round: the rule match was still lexical after the membership walk.
+test_r0c_hook_collapses_dot_and_dotdot_segments_before_matching() {
+  newrepo
+  run r0c_hook Edit "$REPO/src/./auth/existing.js"
+  assert_exit 2 "a . segment must not hide a guarded file"
+  run r0c_hook Edit "$REPO/src/theme/../auth/existing.js"
+  assert_exit 2 "a cancelling .. must not hide a guarded file"
+  run r0c_hook Edit "$REPO/src/auth/../theme.css"
+  assert_exit 0 "and must not make an unguarded one look guarded"
+}
+
+test_r0c_hook_does_not_stall_on_a_very_deep_path() {
+  newrepo
+  local deep="$REPO" i
+  for i in $(seq 1 150); do deep="$deep/d$i"; done
+  local t0 t1; t0=$SECONDS
+  run r0c_hook Write "$deep/x.js"
+  t1=$SECONDS
+  assert_exit 0 "deeper than the cap: not treated as a source file, and it must return"
+  [ $((t1 - t0)) -lt 20 ] && _ok || _fail "a 150-segment path took $((t1 - t0))s"
+}
+
 test_r0c_hook_handles_a_new_file_in_a_directory_that_does_not_exist_yet() {
   newrepo
   run r0c_hook Write "$REPO/src/auth/brand/new/dir/token.js"
@@ -8846,6 +8868,22 @@ test_status_does_not_age_an_untracked_or_unstamped_file() {
   LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
   assert_not_contains "project/map.md: last changed"
   assert_not_contains "registry-draft.md: mined"
+}
+
+# From the B2-B6 gate round: the first version piped `grep | grep -q` under pipefail; grep -q quits at the first match, the
+# upstream grep gets SIGPIPE, and a change WITH gate runs was told it had none. Only visible on a ledger bigger than a pipe
+# buffer with the match early, which the tiny fixtures above never are.
+test_escape_note_is_not_fooled_by_a_large_ledger_with_an_early_match() {
+  newrepo
+  led add --change early-change --gate G4 --tier T2 --round 1 --outcome pass --confidence fresh --model m >/dev/null 2>&1
+  awk 'BEGIN { for (i = 1; i <= 4000; i++) printf "{\"type\":\"gate\",\"date\":\"2026-01-01T00:00:00Z\",\"change\":\"filler-%d\",\"gate\":\"G4\",\"round\":1,\"outcome\":\"pass\",\"note\":\"padding padding padding padding padding\"}\n", i }' >> "$(ledger_path)"
+  [ "$(wc -c < "$(ledger_path)" | tr -d ' ')" -gt 200000 ] && _ok || _fail "the fixture ledger is not large enough to fill a pipe"
+  local i
+  for i in 1 2 3; do
+    run led escape --change early-change --found-by user --severity high
+    assert_exit 0
+    assert_not_contains "no gate runs recorded"
+  done
 }
 
 test_c3_verify_refuses_unknown_options() {

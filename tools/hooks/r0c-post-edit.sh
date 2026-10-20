@@ -86,17 +86,33 @@ case "$FILE_PATH" in
   /*|[A-Za-z]:*)
     REPO_ROOT="$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null)"
     if [ -n "$REPO_ROOT" ]; then
-      _rel=""; _p="$FILE_PATH"; _found=0
-      while :; do
-        if [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
-        _parent="$(dirname "$_p")"
-        case "$_parent" in ""|"."|"$_p") break;; esac
-        _rel="$(basename "$_p")${_rel:+/$_rel}"
-        _p="$_parent"
+      # Parameter expansion only, no dirname/basename: those fork once per segment, and a very deep path made one edit
+      # stall for minutes. The depth is capped too (a path deeper than 100 segments is not a source file).
+      _rel=""; _p="${FILE_PATH%/}"; _found=0; _depth=0
+      while [ "$_depth" -lt 100 ]; do
+        _depth=$((_depth + 1))
+        if [ -n "$_p" ] && [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
+        case "$_p" in */*) ;; *) break;; esac
+        _seg="${_p##*/}"; _parent="${_p%/*}"
+        [ -n "$_parent" ] || _parent="/"
+        [ "$_parent" != "$_p" ] || break
+        _rel="${_seg}${_rel:+/$_rel}"; _p="$_parent"
       done
       [ "$_found" = 1 ] || exit 0          # outside this repository: not our surfaces
       [ -n "$_rel" ] || exit 0             # the root itself
-      FILE_PATH="$_rel"
+      # Collapse `.` and `x/..` so a spelling like tools/./ledger.sh or tools/x/../ledger.sh still meets its rule.
+      _norm=""; _old_ifs="$IFS"; IFS=/
+      set -f
+      for _seg in $_rel; do
+        case "$_seg" in
+          ""|".") ;;
+          "..") _norm="${_norm%/*}"; case "$_norm" in */*) ;; *) _norm="";; esac ;;
+          *) _norm="${_norm:+$_norm/}$_seg" ;;
+        esac
+      done
+      set +f; IFS="$_old_ifs"
+      [ -n "$_norm" ] || exit 0
+      FILE_PATH="$_norm"
     fi
     ;;
 esac
