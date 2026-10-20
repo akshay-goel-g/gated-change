@@ -4680,6 +4680,14 @@ test_hook_warns_but_does_not_block_when_dashboard_sh_fails() {
 # is what makes that mechanical on Claude Code — a PostToolUse hook, not a git
 # hook, so these feed it the same JSON payload Claude Code would put on stdin,
 # rather than diffing a working tree the way `hook()` above does.
+# The repo path as Claude Code would send it on Windows: drive-letter form where cygpath exists, every separator a
+# backslash, each backslash doubled for the JSON string.
+_r0c_json_backslashed() {
+  local p="$1"
+  command -v cygpath >/dev/null 2>&1 && p="$(cygpath -m "$p")"
+  printf '%s' "${p//\//\\\\}"
+}
+
 r0c_hook() {
   local tool="$1" file="$2"
   printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool" "$file" \
@@ -4715,8 +4723,9 @@ test_r0c_hook_reminds_on_a_t3_edit() {
 # blind spot that hid the coverage path-form bug one round earlier.
 test_r0c_hook_fires_on_a_windows_form_path() {
   newrepo
-  local out code
-  out="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"D:\\\\repo\\\\src\\\\auth\\\\existing.js"}}' \
+  local out code win
+  win="$(_r0c_json_backslashed "$REPO")\\\\src\\\\auth\\\\existing.js"
+  out="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$win" \
     | ( cd "$REPO" && bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; code=$?
   LAST_OUT="$out"; LAST_EXIT=$code
   assert_exit 2 "a JSON-escaped Windows path must trip R0c, not pass silently"
@@ -4727,11 +4736,49 @@ test_r0c_hook_fires_on_a_windows_form_path() {
 # must not be treated as a path separator after unescaping either.
 test_r0c_hook_still_ignores_a_windows_path_outside_any_rule() {
   newrepo
-  local out code
-  out="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"D:\\\\repo\\\\src\\\\theme.css"}}' \
+  local out code win
+  win="$(_r0c_json_backslashed "$REPO")\\\\src\\\\theme.css"
+  out="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$win" \
     | ( cd "$REPO" && bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; code=$?
   LAST_OUT="$out"; LAST_EXIT=$code
   assert_exit 0 "a Windows path matching no T3/T4 rule must stay silent"
+}
+
+# B2: the payload path is absolute, the rules are repo-relative. A file outside THIS repository must not trip a rule
+# just because its absolute path contains `tools/hooks/` or `core/`, and a repository that lives under a directory
+# called core/ must not have every file read as T4.
+test_r0c_hook_ignores_a_file_outside_the_repository_even_if_its_path_looks_guarded() {
+  newrepo
+  local outside; outside="$(mktemp -d "$TMPROOT/outside.XXXXXX")"
+  mkdir -p "$outside/src/auth" "$outside/core"
+  : > "$outside/src/auth/x.js"; : > "$outside/core/y.js"
+  run r0c_hook Edit "$outside/src/auth/x.js"
+  assert_exit 0 "a file in another project's auth/ is not this repository's surface"
+  run r0c_hook Edit "$outside/core/y.js"
+  assert_exit 0 "nor is another project's core/"
+  # ...while the same shapes INSIDE the repository still fire
+  run r0c_hook Edit "$REPO/src/auth/existing.js"
+  assert_exit 2
+}
+
+test_r0c_hook_matches_relative_to_the_repo_root_not_to_where_the_repo_lives() {
+  newrepo
+  # a repository checked out beneath a directory literally named core/ (a T4 rule in the shipped template)
+  local base; base="$(mktemp -d "$TMPROOT/host.XXXXXX")"; mkdir -p "$base/core"
+  cp -r "$REPO" "$base/core/proj"
+  local saved="$REPO"; REPO="$base/core/proj"
+  run r0c_hook Edit "$REPO/src/theme.css"
+  assert_exit 0 "src/theme.css is T1; the core/ above the repository must not make it T4"
+  run r0c_hook Edit "$REPO/src/auth/existing.js"
+  assert_exit 2
+  REPO="$saved"
+}
+
+test_r0c_hook_handles_a_new_file_in_a_directory_that_does_not_exist_yet() {
+  newrepo
+  run r0c_hook Write "$REPO/src/auth/brand/new/dir/token.js"
+  assert_exit 2 "a Write may create its directories; membership is found by walking up"
+  assert_contains "src/auth/brand/new/dir/token.js"
 }
 
 test_r0c_hook_is_silent_on_a_t1_or_t2_edit() {

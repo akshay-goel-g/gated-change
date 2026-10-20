@@ -70,6 +70,36 @@ FILE_PATH="$(printf '%s' "$INPUT" | sed -n 's/.*"file_path":"\([^"]*\)".*/\1/p')
 # as a separator, and treating it as one is the safer failure here — a false
 # reminder costs a sentence, a missed one costs the gate.
 FILE_PATH="$(printf '%s' "$FILE_PATH" | sed -e 's/\\\\/\\/g' -e 's/\\/\//g')"
+SHOWN_PATH="$FILE_PATH"
+
+# Rules are repo-relative (`(^|/)tools/hooks/`, `(^|/)core/`), and git hands every other consumer repo-relative paths.
+# This payload is ABSOLUTE, so matching it as it stands made any file anywhere trip a rule: a file in some other
+# project's tools/hooks/, or ANY file of a repository that happens to live under a directory called core/. So: find
+# out whether the file is inside THIS repository, and match its path relative to the repository root.
+#
+# Membership is decided by directory identity (`-ef`: same device and inode), not by comparing strings, because the
+# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, a symlinked checkout) need not match
+# the spelling git gives for the root, and a mismatch here would turn the hook silently off, the failure this file
+# already had once. Walk up from the file to the first ancestor that IS the root, collecting the names passed on the
+# way (the file's own directories may not exist yet: a Write can create them). Not found = outside the repository.
+case "$FILE_PATH" in
+  /*|[A-Za-z]:*)
+    REPO_ROOT="$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$REPO_ROOT" ]; then
+      _rel=""; _p="$FILE_PATH"; _found=0
+      while :; do
+        if [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
+        _parent="$(dirname "$_p")"
+        case "$_parent" in ""|"."|"$_p") break;; esac
+        _rel="$(basename "$_p")${_rel:+/$_rel}"
+        _p="$_parent"
+      done
+      [ "$_found" = 1 ] || exit 0          # outside this repository: not our surfaces
+      [ -n "$_rel" ] || exit 0             # the root itself
+      FILE_PATH="$_rel"
+    fi
+    ;;
+esac
 
 # No surfaces file, nothing to check against — fail open, not closed. The
 # pre-push hook fails CLOSED on this same condition because it is the last
@@ -103,7 +133,7 @@ cat >&2 <<EOF
 
 R0c — mid-session re-entry (core/01-router.md)
 
-  $FILE_PATH just changed and matches a $MATCH_TIER row in surfaces.conf:
+  $SHOWN_PATH just changed and matches a $MATCH_TIER row in surfaces.conf:
     "$MATCH_LABEL"
 
   This edit did not go through Triage on its own — it happened while
