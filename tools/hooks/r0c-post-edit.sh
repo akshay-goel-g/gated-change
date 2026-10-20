@@ -40,9 +40,10 @@ INPUT="$(cat)"
 
 # Same idiom every JSON-reading tool in this kit already uses (tools/dashboard.sh,
 # tools/ledger.sh): sed extraction of one known top-level key, not a parser. Safe
-# here because tool_input.file_path is always the FIRST "file_path" key in an
-# Edit/Write/MultiEdit payload, and Claude Code never puts a literal `"` in it
-# (it is a filesystem path, not free text).
+# here because an Edit/Write/MultiEdit payload carries one "file_path" key, in compact
+# JSON, and Claude Code never puts a literal `"` in a path. The greedy `.*` takes the
+# LAST such key if a payload ever had two; pretty-printed JSON (a space after the
+# colon) or a quote inside a path fails OPEN, silently, which this hook accepts as a nudge.
 TOOL_NAME="$(printf '%s' "$INPUT" | sed -n 's/.*"tool_name":"\([^"]*\)".*/\1/p')"
 case "$TOOL_NAME" in
   Edit|Write|MultiEdit) ;;
@@ -78,10 +79,13 @@ SHOWN_PATH="$FILE_PATH"
 # out whether the file is inside THIS repository, and match its path relative to the repository root.
 #
 # Membership is decided by directory identity (`-ef`: same device and inode), not by comparing strings, because the
-# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, a symlinked checkout) need not match
+# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, the repo ROOT reached through a symlink or junction) need not match
 # the spelling git gives for the root, and a mismatch here would turn the hook silently off, the failure this file
 # already had once. Walk up from the file to the first ancestor that IS the root, collecting the names passed on the
 # way (the file's own directories may not exist yet: a Write can create them). Not found = outside the repository.
+# Limits, all fail-open: only the ROOT is compared by identity, so a symlink or junction INSIDE the repository that
+# points at a guarded directory is not resolved; the rule match is case-sensitive; the walk stops after 100 segments;
+# and `-e` on every ancestor means a path on an unreachable network share (UNC) can stall the hook until the OS gives up.
 case "$FILE_PATH" in
   /*|[A-Za-z]:*)
     REPO_ROOT="$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null)"
