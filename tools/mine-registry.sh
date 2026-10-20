@@ -117,7 +117,7 @@ mkdir -p "$(dirname "$OUT")"
 {
   echo "# Coupling registry — mined draft"
   echo
-  echo "> Generated $(date -u '+%Y-%m-%d %H:%M UTC') from $USED fix commits since \"$SINCE\"."
+  echo "> Generated $(date -u '+%Y-%m-%d %H:%M UTC') at commit $(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown) from $USED fix commits since \"$SINCE\"."
   echo "> Files appearing in more than ${HUB_PCT}% of those commits were dropped as hubs."
   echo ">"
   echo "> **These are candidates, not entries.** Each pair is a statistical hint that two"

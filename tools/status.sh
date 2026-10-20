@@ -405,6 +405,54 @@ if [ -n "$STARVED" ]; then
   say "   there, ask or verify, with --basis, instead.)"
 fi
 
+# ---------------------------------------------------------------- stale curated input
+#
+# G4 Ripple reads project/registry.md and project/map.md. A file full of true couplings from two hundred commits ago
+# still passes every check above, and is quietly wrong about the code as it is now. The mined draft is worse off: it
+# is a snapshot. Age is measured in COMMITS since the file last changed (or, for the draft, since the commit it was
+# mined at), not in days: a quiet repository does not make a registry stale, and a busy one does in a week. Read-only
+# and advisory, like the blocks around it: it never changes the exit code.
+#   REGISTRY_STALE_COMMITS=<n>   how many commits behind before it says so (default 100; 0 turns the check off)
+_stale_n="${REGISTRY_STALE_COMMITS:-100}"
+case "$_stale_n" in ''|*[!0-9]*) _stale_n=100;; esac
+STALE_INPUT=""
+_commits_since() { # <rev>  -> number of commits in <rev>..HEAD, or nothing
+  [ -n "$1" ] && git -C "$KIT" rev-parse --verify -q "$1^{commit}" >/dev/null 2>&1 || return 0
+  git -C "$KIT" rev-list --count "$1..HEAD" 2>/dev/null
+}
+_stale_file() { # <file> <label>: tracked files only (an untracked file has no history to age)
+  local f="$1" label="$2" last n
+  [ -f "$f" ] || return 0
+  git -C "$KIT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 || return 0
+  last="$(git -C "$KIT" log -1 --format=%H -- "$f" 2>/dev/null)"
+  n="$(_commits_since "$last")"
+  [ -n "$n" ] && [ "$n" -ge "$_stale_n" ] \
+    && STALE_INPUT="${STALE_INPUT}    $label: last changed $n commit(s) ago ($(printf '%.8s' "$last"))
+"
+  return 0
+}
+if [ "$_stale_n" -gt 0 ]; then
+  [ "$_reg_entries" -gt 0 ] && _stale_file "$KIT/project/registry.md" "project/registry.md"
+  _stale_file "$KIT/project/map.md" "project/map.md"
+  # The mined draft carries the commit it was mined at ("... at commit <sha> ..."), and is rarely committed.
+  _draft="$KIT/project/registry-draft.md"
+  if [ -f "$_draft" ]; then
+    _dsha="$(sed -n 's/^> Generated .* at commit \([0-9a-f]\{7,40\}\) from .*/\1/p' "$_draft" | head -n 1)"
+    _dn="$(_commits_since "$_dsha")"
+    [ -n "$_dn" ] && [ "$_dn" -ge "$_stale_n" ] \
+      && STALE_INPUT="${STALE_INPUT}    project/registry-draft.md: mined $_dn commit(s) ago ($_dsha)
+"
+  fi
+fi
+if [ -n "$STALE_INPUT" ]; then
+  say ""
+  say "  STALE INPUT (advisory)"
+  say "  ----------------------"
+  [ "$QUIET" -eq 1 ] || printf '%s' "$STALE_INPUT"
+  say "  G4 Ripple reads these. Re-read them against what changed since, then COMMIT them (or re-mine:"
+  say "    bash $KIT/tools/mine-registry.sh). Threshold: REGISTRY_STALE_COMMITS=$_stale_n commits (0 = off)."
+fi
+
 # ---------------------------------------------------------------- governance staleness
 #
 # project/govern.md already schedules a cadence for exactly this kind of

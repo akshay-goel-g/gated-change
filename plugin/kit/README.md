@@ -376,6 +376,8 @@ landed since the last gate run, which gates have never run, and which enforcemen
 not installed. It needs no arguments and no prior knowledge of what you are working on, which
 is exactly what you want when the pipeline is the thing that stopped.
 
+It also says, advisory only (the exit code is unchanged), when `project/registry.md`, `project/map.md` or a mined `registry-draft.md` is a hundred or more commits behind HEAD — G4 reads them, and a registry that was true two hundred commits ago is quietly wrong now. `REGISTRY_STALE_COMMITS=<n>` changes the threshold; `0` turns it off.
+
 ### 6 · Commit it, and work on a branch
 
 ```bash

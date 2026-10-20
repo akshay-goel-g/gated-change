@@ -40,9 +40,10 @@ INPUT="$(cat)"
 
 # Same idiom every JSON-reading tool in this kit already uses (tools/dashboard.sh,
 # tools/ledger.sh): sed extraction of one known top-level key, not a parser. Safe
-# here because tool_input.file_path is always the FIRST "file_path" key in an
-# Edit/Write/MultiEdit payload, and Claude Code never puts a literal `"` in it
-# (it is a filesystem path, not free text).
+# here because an Edit/Write/MultiEdit payload carries one "file_path" key, in compact
+# JSON, and Claude Code never puts a literal `"` in a path. The greedy `.*` takes the
+# LAST such key if a payload ever had two; pretty-printed JSON (a space after the
+# colon) or a quote inside a path fails OPEN, silently, which this hook accepts as a nudge.
 TOOL_NAME="$(printf '%s' "$INPUT" | sed -n 's/.*"tool_name":"\([^"]*\)".*/\1/p')"
 case "$TOOL_NAME" in
   Edit|Write|MultiEdit) ;;
@@ -70,6 +71,55 @@ FILE_PATH="$(printf '%s' "$INPUT" | sed -n 's/.*"file_path":"\([^"]*\)".*/\1/p')
 # as a separator, and treating it as one is the safer failure here — a false
 # reminder costs a sentence, a missed one costs the gate.
 FILE_PATH="$(printf '%s' "$FILE_PATH" | sed -e 's/\\\\/\\/g' -e 's/\\/\//g')"
+SHOWN_PATH="$FILE_PATH"
+
+# Rules are repo-relative (`(^|/)tools/hooks/`, `(^|/)core/`), and git hands every other consumer repo-relative paths.
+# This payload is ABSOLUTE, so matching it as it stands made any file anywhere trip a rule: a file in some other
+# project's tools/hooks/, or ANY file of a repository that happens to live under a directory called core/. So: find
+# out whether the file is inside THIS repository, and match its path relative to the repository root.
+#
+# Membership is decided by directory identity (`-ef`: same device and inode), not by comparing strings, because the
+# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, the repo ROOT reached through a symlink or junction) need not match
+# the spelling git gives for the root, and a mismatch here would turn the hook silently off, the failure this file
+# already had once. Walk up from the file to the first ancestor that IS the root, collecting the names passed on the
+# way (the file's own directories may not exist yet: a Write can create them). Not found = outside the repository.
+# Limits, all fail-open: only the ROOT is compared by identity, so a symlink or junction INSIDE the repository that
+# points at a guarded directory is not resolved; the rule match is case-sensitive; the walk stops after 100 segments;
+# and `-e` on every ancestor means a path on an unreachable network share (UNC) can stall the hook until the OS gives up.
+case "$FILE_PATH" in
+  /*|[A-Za-z]:*)
+    REPO_ROOT="$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "$REPO_ROOT" ]; then
+      # Parameter expansion only, no dirname/basename: those fork once per segment, and a very deep path made one edit
+      # stall for minutes. The depth is capped too (a path deeper than 100 segments is not a source file).
+      _rel=""; _p="${FILE_PATH%/}"; _found=0; _depth=0
+      while [ "$_depth" -lt 100 ]; do
+        _depth=$((_depth + 1))
+        if [ -n "$_p" ] && [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
+        case "$_p" in */*) ;; *) break;; esac
+        _seg="${_p##*/}"; _parent="${_p%/*}"
+        [ -n "$_parent" ] || _parent="/"
+        [ "$_parent" != "$_p" ] || break
+        _rel="${_seg}${_rel:+/$_rel}"; _p="$_parent"
+      done
+      [ "$_found" = 1 ] || exit 0          # outside this repository: not our surfaces
+      [ -n "$_rel" ] || exit 0             # the root itself
+      # Collapse `.` and `x/..` so a spelling like tools/./ledger.sh or tools/x/../ledger.sh still meets its rule.
+      _norm=""; _old_ifs="$IFS"; IFS=/
+      set -f
+      for _seg in $_rel; do
+        case "$_seg" in
+          ""|".") ;;
+          "..") case "$_norm" in */*) _norm="${_norm%/*}";; *) _norm="";; esac ;;
+          *) _norm="${_norm:+$_norm/}$_seg" ;;
+        esac
+      done
+      set +f; IFS="$_old_ifs"
+      [ -n "$_norm" ] || exit 0
+      FILE_PATH="$_norm"
+    fi
+    ;;
+esac
 
 # No surfaces file, nothing to check against — fail open, not closed. The
 # pre-push hook fails CLOSED on this same condition because it is the last
@@ -103,7 +153,7 @@ cat >&2 <<EOF
 
 R0c — mid-session re-entry (core/01-router.md)
 
-  $FILE_PATH just changed and matches a $MATCH_TIER row in surfaces.conf:
+  $SHOWN_PATH just changed and matches a $MATCH_TIER row in surfaces.conf:
     "$MATCH_LABEL"
 
   This edit did not go through Triage on its own — it happened while

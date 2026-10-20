@@ -4585,6 +4585,43 @@ test_install_hook_force_replaces_a_stale_copy() {
   assert_file_contains "$REPO/.git/hooks/pre-push" "Dashboard auto-regeneration"
 }
 
+# B3: the installed hook has its PIPELINE_DIR rewritten to the kit's prefix, so comparing the TEMPLATE with it said
+# "a different hook exists" on every re-run for a kit that is not at .pipeline/ (this repo runs the hook on itself).
+# The self-hosting fixture carries only tools/ and core/; the installer also needs the pre-push template and a surfaces file.
+_selfhost_install_ready() {
+  selfhostrepo
+  cp -r "$KIT/templates" "$SELFREPO/templates"
+  mkdir -p "$SELFREPO/project"; cp "$KIT/project/surfaces.conf" "$SELFREPO/project/surfaces.conf"
+}
+
+test_install_hook_is_idempotent_for_a_kit_that_is_not_at_dot_pipeline() {
+  _selfhost_install_ready
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 0
+  assert_contains "Installed"
+  assert_file_contains "$SELFREPO/.git/hooks/pre-push" 'PIPELINE_DIR="${PIPELINE_DIR:-.}"'
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 0 "a re-run of the same install is not a conflict"
+  assert_contains "Already installed and identical"
+}
+
+test_install_hook_is_idempotent_at_the_default_prefix_too() {
+  newrepo
+  bash -c "cd '$REPO' && bash .pipeline/tools/install-hook.sh" >/dev/null 2>&1
+  run bash -c "cd '$REPO' && bash .pipeline/tools/install-hook.sh"
+  assert_exit 0
+  assert_contains "Already installed and identical"
+}
+
+test_install_hook_still_refuses_a_hook_that_really_differs_at_a_custom_prefix() {
+  _selfhost_install_ready
+  bash -c "cd '$SELFREPO' && bash tools/install-hook.sh" >/dev/null 2>&1
+  printf '\n# local edit\n' >> "$SELFREPO/.git/hooks/pre-push"
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 2
+  assert_contains "Refusing to overwrite"
+}
+
 test_install_hook_does_not_clobber_an_existing_hook() {
   newrepo
   mkdir -p "$REPO/.git/hooks"
@@ -4680,6 +4717,14 @@ test_hook_warns_but_does_not_block_when_dashboard_sh_fails() {
 # is what makes that mechanical on Claude Code — a PostToolUse hook, not a git
 # hook, so these feed it the same JSON payload Claude Code would put on stdin,
 # rather than diffing a working tree the way `hook()` above does.
+# The repo path as Claude Code would send it on Windows: drive-letter form where cygpath exists, every separator a
+# backslash, each backslash doubled for the JSON string.
+_r0c_json_backslashed() {
+  local p="$1"
+  command -v cygpath >/dev/null 2>&1 && p="$(cygpath -m "$p")"
+  printf '%s' "${p//\//\\\\}"
+}
+
 r0c_hook() {
   local tool="$1" file="$2"
   printf '{"tool_name":"%s","tool_input":{"file_path":"%s"}}' "$tool" "$file" \
@@ -4715,8 +4760,9 @@ test_r0c_hook_reminds_on_a_t3_edit() {
 # blind spot that hid the coverage path-form bug one round earlier.
 test_r0c_hook_fires_on_a_windows_form_path() {
   newrepo
-  local out code
-  out="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"D:\\\\repo\\\\src\\\\auth\\\\existing.js"}}' \
+  local out code win
+  win="$(_r0c_json_backslashed "$REPO")\\\\src\\\\auth\\\\existing.js"
+  out="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$win" \
     | ( cd "$REPO" && bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; code=$?
   LAST_OUT="$out"; LAST_EXIT=$code
   assert_exit 2 "a JSON-escaped Windows path must trip R0c, not pass silently"
@@ -4727,11 +4773,79 @@ test_r0c_hook_fires_on_a_windows_form_path() {
 # must not be treated as a path separator after unescaping either.
 test_r0c_hook_still_ignores_a_windows_path_outside_any_rule() {
   newrepo
-  local out code
-  out="$(printf '%s' '{"tool_name":"Edit","tool_input":{"file_path":"D:\\\\repo\\\\src\\\\theme.css"}}' \
+  local out code win
+  win="$(_r0c_json_backslashed "$REPO")\\\\src\\\\theme.css"
+  out="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$win" \
     | ( cd "$REPO" && bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; code=$?
   LAST_OUT="$out"; LAST_EXIT=$code
   assert_exit 0 "a Windows path matching no T3/T4 rule must stay silent"
+}
+
+# B2: the payload path is absolute, the rules are repo-relative. A file outside THIS repository must not trip a rule
+# just because its absolute path contains `tools/hooks/` or `core/`, and a repository that lives under a directory
+# called core/ must not have every file read as T4.
+test_r0c_hook_ignores_a_file_outside_the_repository_even_if_its_path_looks_guarded() {
+  newrepo
+  local outside; outside="$(mktemp -d "$TMPROOT/outside.XXXXXX")"
+  mkdir -p "$outside/src/auth" "$outside/core"
+  : > "$outside/src/auth/x.js"; : > "$outside/core/y.js"
+  run r0c_hook Edit "$outside/src/auth/x.js"
+  assert_exit 0 "a file in another project's auth/ is not this repository's surface"
+  run r0c_hook Edit "$outside/core/y.js"
+  assert_exit 0 "nor is another project's core/"
+  # ...while the same shapes INSIDE the repository still fire
+  run r0c_hook Edit "$REPO/src/auth/existing.js"
+  assert_exit 2
+}
+
+test_r0c_hook_matches_relative_to_the_repo_root_not_to_where_the_repo_lives() {
+  newrepo
+  # a repository checked out beneath a directory literally named core/ (a T4 rule in the shipped template)
+  local base; base="$(mktemp -d "$TMPROOT/host.XXXXXX")"; mkdir -p "$base/core"
+  cp -r "$REPO" "$base/core/proj"
+  local saved="$REPO"; REPO="$base/core/proj"
+  run r0c_hook Edit "$REPO/src/theme.css"
+  assert_exit 0 "src/theme.css is T1; the core/ above the repository must not make it T4"
+  run r0c_hook Edit "$REPO/src/auth/existing.js"
+  assert_exit 2
+  REPO="$saved"
+}
+
+# From the B2 gate round: the rule match was still lexical after the membership walk.
+test_r0c_hook_collapses_dot_and_dotdot_segments_before_matching() {
+  newrepo
+  run r0c_hook Edit "$REPO/src/./auth/existing.js"
+  assert_exit 2 "a . segment must not hide a guarded file"
+  run r0c_hook Edit "$REPO/src/theme/../auth/existing.js"
+  assert_exit 2 "a cancelling .. must not hide a guarded file"
+  run r0c_hook Edit "$REPO/src/auth/../theme.css"
+  assert_exit 0 "and must not make an unguarded one look guarded"
+  # a pop from a TWO-segment prefix must leave the first segment: core/x/../y.js is core/y.js (a rule that needs the
+  # directory prefix), not y.js
+  run r0c_hook Edit "$REPO/core/x/../y.js"
+  assert_exit 2 "popping back to core/ must keep core/"
+  run r0c_hook Edit "$REPO/core/nonexistent/../y.js"
+  assert_exit 2
+  run r0c_hook Edit "$REPO/src/a/b/../../auth/existing.js"
+  assert_exit 2 "several pops in a row"
+}
+
+test_r0c_hook_does_not_stall_on_a_very_deep_path() {
+  newrepo
+  local deep="$REPO" i
+  for i in $(seq 1 150); do deep="$deep/d$i"; done
+  local t0 t1; t0=$SECONDS
+  run r0c_hook Write "$deep/x.js"
+  t1=$SECONDS
+  assert_exit 0 "deeper than the cap: not treated as a source file, and it must return"
+  [ $((t1 - t0)) -lt 20 ] && _ok || _fail "a 150-segment path took $((t1 - t0))s"
+}
+
+test_r0c_hook_handles_a_new_file_in_a_directory_that_does_not_exist_yet() {
+  newrepo
+  run r0c_hook Write "$REPO/src/auth/brand/new/dir/token.js"
+  assert_exit 2 "a Write may create its directories; membership is found by walking up"
+  assert_contains "src/auth/brand/new/dir/token.js"
 }
 
 test_r0c_hook_is_silent_on_a_t1_or_t2_edit() {
@@ -7161,6 +7275,20 @@ test_mine_registry_is_graceful_on_a_young_repo() {
   assert_contains "Not enough history to mine"
 }
 
+# B6: the draft records the commit it was mined at, so its age can be measured later.
+test_mine_registry_stamps_the_commit_it_ran_at() {
+  newrepo
+  local i
+  for i in 1 2; do
+    printf 'v%s\n' "$i" > "$REPO/src/a.js"; printf 'v%s\n' "$i" > "$REPO/src/b.js"
+    git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "fix: a and b together ($i)" >/dev/null 2>&1
+  done
+  local head; head="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+  run bash -c "cd '$REPO' && bash .pipeline/tools/mine-registry.sh '$REPO/draft.md'"
+  assert_exit 0
+  assert_file_contains "$REPO/draft.md" "at commit $head from "
+}
+
 # E7: the draft belongs INSIDE the install (.pipeline/project), not at the repo root,
 # or the next step's `cp -r templates/project` nests into project/project.
 test_mine_registry_default_output_lands_inside_the_kit() {
@@ -8673,6 +8801,122 @@ test_c3_the_ok_lines_say_what_they_do_not_prove() {
   git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
   run led verify; assert_exit 0; assert_contains "recomputing every later prev"
   run led verify --against HEAD; assert_exit 0; assert_contains "not anchored by this check"
+}
+
+# B4: `escape` decided whether a change "ever ran the gates" with the change name pasted into a regex.
+test_escape_note_about_missing_gate_runs_matches_the_change_name_literally() {
+  newrepo
+  led add --change aXb --gate G4 --tier T2 --round 1 --outcome pass --confidence fresh --model m >/dev/null 2>&1
+  run led escape --change "a.b" --found-by user --severity high
+  assert_exit 0
+  assert_contains "no gate runs recorded for 'a.b'"
+  run led escape --change "aXb" --found-by user --severity high
+  assert_exit 0
+  assert_not_contains "no gate runs recorded"
+  run led escape --change "a[b" --found-by user --severity high
+  assert_exit 0
+  assert_contains "no gate runs recorded for 'a[b'"
+}
+
+# B5: every third-party action in the workflows is pinned to a full commit sha (a tag can be moved after the fact).
+test_workflow_actions_are_pinned_to_a_commit_sha() {
+  local f bad=""
+  for f in "$KIT"/.github/workflows/*.yml; do
+    [ -f "$f" ] || continue
+    bad="$bad$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$f" | grep -vE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' | sed "s|^|$(basename "$f"): |")"
+  done
+  [ -z "$bad" ] && _ok || _fail "unpinned action reference(s): $bad"
+}
+
+# B6: curated inputs G4 reads (project/registry.md, project/map.md) and the mined draft are aged in COMMITS.
+_stale_commits() { local i; for i in $(seq 1 "$1"); do git -C "$REPO" commit -q --allow-empty -m "work $i" >/dev/null 2>&1; done; }
+status_stale() { ( cd "$REPO" && REGISTRY_STALE_COMMITS="$1" bash .pipeline/tools/status.sh ); }
+
+test_status_says_a_curated_input_is_many_commits_behind_head() {
+  newrepo
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "STALE INPUT (advisory)"
+  assert_contains "project/map.md: last changed 3 commit(s) ago"
+  # touching the file resets its age
+  printf '\n<!-- reviewed -->\n' >> "$REPO/.pipeline/project/map.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "map reviewed" >/dev/null 2>&1
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+}
+
+test_status_stale_input_is_silent_below_the_threshold_off_and_never_changes_the_exit_code() {
+  newrepo
+  _stale_commits 3
+  local plain code_plain code_stale
+  plain="$(status_stale 100 2>&1)"; code_plain=$?
+  case "$plain" in *"STALE INPUT"*) _fail "reported staleness below the threshold";; *) _ok;; esac
+  LAST_OUT="$(status_stale 0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "STALE INPUT"
+  status_stale 2 >/dev/null 2>&1; code_stale=$?
+  assert_eq "$code_plain" "$code_stale" "the advisory block must not move status.sh's exit code"
+}
+
+test_status_stale_threshold_is_inclusive_at_exactly_n_commits() {
+  newrepo
+  _stale_commits 3
+  LAST_OUT="$(status_stale 3 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/map.md: last changed 3 commit(s) ago"
+  LAST_OUT="$(status_stale 4 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+}
+
+test_status_ages_the_registry_only_when_it_holds_entries() {
+  newrepo
+  # the shipped TEMPLATE registry holds no entries: it is already reported as starved, not as stale
+  cp "$KIT/templates/project/registry.md" "$REPO/.pipeline/project/registry.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "empty registry" >/dev/null 2>&1
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/registry.md: last changed"
+  # give it one real entry, commit, let the repository move on
+  printf '\n| If you touch src/auth/ | also check src/session/ | sessions must be invalidated |\n' >> "$REPO/.pipeline/project/registry.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "registry entry" >/dev/null 2>&1
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/registry.md: last changed 3 commit(s) ago"
+}
+
+test_status_ages_a_mined_draft_by_the_commit_it_was_mined_at() {
+  newrepo
+  local first; first="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+  printf '# Coupling registry — mined draft\n\n> Generated 2026-10-01 10:00 UTC at commit %s from 4 fix commits since "6 months ago".\n' "$first" \
+    > "$REPO/.pipeline/project/registry-draft.md"
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/registry-draft.md: mined 3 commit(s) ago ($first)"
+}
+
+test_status_does_not_age_an_untracked_or_unstamped_file() {
+  newrepo
+  rm -f "$REPO/.pipeline/project/map.md"; git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "drop map" >/dev/null 2>&1
+  printf 'notes\n' > "$REPO/.pipeline/project/map.md"                    # present but untracked
+  printf '# draft with no stamp\n' > "$REPO/.pipeline/project/registry-draft.md"
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+  assert_not_contains "registry-draft.md: mined"
+}
+
+# From the B2-B6 gate round: the first version piped `grep | grep -q` under pipefail; grep -q quits at the first match, the
+# upstream grep gets SIGPIPE, and a change WITH gate runs was told it had none. Only visible on a ledger bigger than a pipe
+# buffer with the match early, which the tiny fixtures above never are.
+test_escape_note_is_not_fooled_by_a_large_ledger_with_an_early_match() {
+  newrepo
+  led add --change early-change --gate G4 --tier T2 --round 1 --outcome pass --confidence fresh --model m >/dev/null 2>&1
+  awk 'BEGIN { for (i = 1; i <= 4000; i++) printf "{\"type\":\"gate\",\"date\":\"2026-01-01T00:00:00Z\",\"change\":\"filler-%d\",\"gate\":\"G4\",\"round\":1,\"outcome\":\"pass\",\"note\":\"padding padding padding padding padding\"}\n", i }' >> "$(ledger_path)"
+  [ "$(wc -c < "$(ledger_path)" | tr -d ' ')" -gt 200000 ] && _ok || _fail "the fixture ledger is not large enough to fill a pipe"
+  local i
+  for i in 1 2 3; do
+    run led escape --change early-change --found-by user --severity high
+    assert_exit 0
+    assert_not_contains "no gate runs recorded"
+  done
 }
 
 test_c3_verify_refuses_unknown_options() {
