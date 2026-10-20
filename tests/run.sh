@@ -8633,6 +8633,19 @@ test_c3_an_empty_ledger_has_nothing_to_verify() {
   run led verify; assert_exit 1 "a missing ledger is still an error"
 }
 
+test_c3_a_stale_lock_that_cannot_be_removed_ends_in_a_refusal_not_a_hang() {
+  newrepo
+  c3_route 1
+  local lock; lock="$(ledger_path).lock"
+  : > "$lock"                                   # a regular file: rmdir cannot remove it
+  touch -d '10 minutes ago' "$lock" 2>/dev/null || touch -t 200001010000 "$lock"
+  run env LEDGER_LOCK_WAIT=3 bash -c "cd '$REPO' && LED_NO_EVIDENCE=1 bash .pipeline/tools/ledger.sh --ledger '$(ledger_path)' route --change c3 --predicted T2 --actual T2 --reason blocked"
+  assert_exit 3
+  assert_contains "rmdir"
+  assert_contains "Nothing was written"
+  rm -f "$lock"
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1

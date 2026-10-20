@@ -315,17 +315,29 @@ refuse_branchy_change() {
 # The chain makes every write read the last line and then append, so two writers at once (parallel fresh-context
 # gate reviewers logging to one ledger is a normal shape) would link to the same predecessor and leave a break
 # that can never be repaired. The read-hash-append is serialised with an atomic directory lock next to the ledger.
-# A lock older than two minutes is a crashed writer's and is broken.
+# A lock older than two minutes is a crashed writer's and is broken (two waiters breaking the same dead lock at the
+# same instant can still both proceed: that needs a killed writer AND a race, and is the one hole left). Waiting gives
+# up after LEDGER_LOCK_WAIT seconds (default 150) with the rmdir remedy named.
 ledger_unlock() { rmdir "$LEDGER.lock" 2>/dev/null; return 0; }
 ledger_lock() {
-  local tries=0
+  local dir start="$SECONDS" wait="${LEDGER_LOCK_WAIT:-150}"
+  case "$wait" in ''|*[!0-9]*) wait=150;; esac
+  dir="$(dirname "$LEDGER")"
+  # A directory we cannot create the lock in is not "a stuck writer": say so at once.
+  if [ ! -w "$dir" ]; then
+    echo "REFUSED: $dir is not writable, so the ledger write lock cannot be taken. Nothing was written." >&2
+    exit 3
+  fi
   while ! mkdir "$LEDGER.lock" 2>/dev/null; do
-    tries=$((tries + 1))
-    if [ -n "$(find "$LEDGER.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rmdir "$LEDGER.lock" 2>/dev/null; continue; fi
-    if [ "$tries" -gt 600 ]; then
-      echo "REFUSED: could not take the ledger write lock $LEDGER.lock in 60s (another writer is stuck?). Nothing was written." >&2
+    # The wall-clock cap comes FIRST and exceeds the two-minute stale age, so a lock a crashed writer left behind
+    # becomes breakable before any waiter gives up. (A stale lock that cannot be removed -- a regular file of that
+    # name, a non-empty directory -- must not turn this loop into a hot spin.)
+    if [ $((SECONDS - start)) -ge "$wait" ]; then
+      echo "REFUSED: could not take the ledger write lock in ${wait}s. If no other ledger.sh is running, a crashed writer left it:" >&2
+      echo "    rmdir '$LEDGER.lock'    (or rm -rf it if that is not a directory). Nothing was written." >&2
       exit 3
     fi
+    if [ -n "$(find "$LEDGER.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] && rmdir "$LEDGER.lock" 2>/dev/null; then continue; fi
     sleep 0.1 2>/dev/null || sleep 1
   done
   trap ledger_unlock EXIT
@@ -2705,8 +2717,12 @@ cmd_verify() {
   if [ "$breaks" -ne 0 ]; then echo "VERIFY FAILED — see the BREAK line(s) above. To see what changed: git diff -- $LEDGER (or git log -p -- $LEDGER)" >&2; exit 1; fi
   if [ -n "$(tail -c 1 "$LEDGER" 2>/dev/null)" ]; then echo "  note: the last line has no newline (a truncated write); the next record starts a new line." >&2; fi
   echo "verify: OK"
-  if [ -z "$expect_head" ] && [ -z "$against" ]; then
-    echo "  (unpinned and unanchored: this does not detect an edited last record, a truncated tail, a ledger with every prev stripped, or the removal of one side of a JOIN. Use --expect-head <hash> and/or --against <rev>.)"
+  if [ -z "$against" ]; then
+    if [ -z "$expect_head" ]; then
+      echo "  (unpinned and unanchored: this does not detect an edited last record, a truncated tail, a ledger with every prev stripped, edits to the legacy prefix, or the removal of one side of a JOIN. Use --expect-head <hash> and/or --against <rev>.)"
+    else
+      echo "  (tail pinned only: --expect-head does not cover the legacy prefix, a stripped chain, or one side of a JOIN. Add --against <rev> for those.)"
+    fi
   fi
   exit 0
 }

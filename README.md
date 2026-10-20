@@ -809,7 +809,7 @@ checkout a `BASE` it contains.
 ### `ledger.sh` — record and report
 
 ```bash
-ledger.sh verify     [--allow-joins] [--expect-head <hash>] [--against <rev>]   # walks the per-line sha256 chain; exit 1 on an edit, deletion, reorder or duplicate (a merged ledger needs --allow-joins; read the plain-OK caveat)
+ledger.sh verify     [--allow-joins] [--expect-head <hash>] [--against <rev>]   # walks the per-line sha256 chain; exit 1 on an edit, deletion, reorder or byte-identical duplicate (a merged ledger needs --allow-joins; read the OK caveat)
 ledger.sh add        --change <n> --gate G7 --tier T4 --round 1 --outcome pass|fail|skipped|n/a [--commit <hex sha>] \
                      [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>] \
                      --confidence fresh|low [--challenged true|false] [--model <name>] \
