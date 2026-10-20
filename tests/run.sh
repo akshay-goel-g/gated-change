@@ -4585,6 +4585,43 @@ test_install_hook_force_replaces_a_stale_copy() {
   assert_file_contains "$REPO/.git/hooks/pre-push" "Dashboard auto-regeneration"
 }
 
+# B3: the installed hook has its PIPELINE_DIR rewritten to the kit's prefix, so comparing the TEMPLATE with it said
+# "a different hook exists" on every re-run for a kit that is not at .pipeline/ (this repo runs the hook on itself).
+# The self-hosting fixture carries only tools/ and core/; the installer also needs the pre-push template and a surfaces file.
+_selfhost_install_ready() {
+  selfhostrepo
+  cp -r "$KIT/templates" "$SELFREPO/templates"
+  mkdir -p "$SELFREPO/project"; cp "$KIT/project/surfaces.conf" "$SELFREPO/project/surfaces.conf"
+}
+
+test_install_hook_is_idempotent_for_a_kit_that_is_not_at_dot_pipeline() {
+  _selfhost_install_ready
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 0
+  assert_contains "Installed"
+  assert_file_contains "$SELFREPO/.git/hooks/pre-push" 'PIPELINE_DIR="${PIPELINE_DIR:-.}"'
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 0 "a re-run of the same install is not a conflict"
+  assert_contains "Already installed and identical"
+}
+
+test_install_hook_is_idempotent_at_the_default_prefix_too() {
+  newrepo
+  bash -c "cd '$REPO' && bash .pipeline/tools/install-hook.sh" >/dev/null 2>&1
+  run bash -c "cd '$REPO' && bash .pipeline/tools/install-hook.sh"
+  assert_exit 0
+  assert_contains "Already installed and identical"
+}
+
+test_install_hook_still_refuses_a_hook_that_really_differs_at_a_custom_prefix() {
+  _selfhost_install_ready
+  bash -c "cd '$SELFREPO' && bash tools/install-hook.sh" >/dev/null 2>&1
+  printf '\n# local edit\n' >> "$SELFREPO/.git/hooks/pre-push"
+  run bash -c "cd '$SELFREPO' && bash tools/install-hook.sh"
+  assert_exit 2
+  assert_contains "Refusing to overwrite"
+}
+
 test_install_hook_does_not_clobber_an_existing_hook() {
   newrepo
   mkdir -p "$REPO/.git/hooks"
