@@ -52,8 +52,23 @@ if grep -q 'EXAMPLE from a browser-extension project' "$CONF" 2>/dev/null; then
   echo >&2
 fi
 
+# Point the installed copy at wherever the kit actually is. A hook runs with
+# the repo root as its cwd and inherits no environment from whoever pushes, so
+# this has to be baked in at install time — and the installed hook is local
+# config rather than a shipped artifact, so baking it in is the right place. An
+# empty prefix means the kit IS the repository, which is how this repo runs the
+# hook on itself.
+PREFIX="$(git -C "$KIT" rev-parse --show-prefix 2>/dev/null)"
+PREFIX="${PREFIX%/}"
+[ -n "$PREFIX" ] || PREFIX="."
+RENDERED="$(mktemp 2>/dev/null)" || { echo "cannot create a temp file" >&2; exit 2; }
+trap 'rm -f "$RENDERED"' EXIT
+sed "s|^PIPELINE_DIR=\"\${PIPELINE_DIR:-.pipeline}\"|PIPELINE_DIR=\"\${PIPELINE_DIR:-$PREFIX}\"|" "$SRC" > "$RENDERED"
+
 if [ -e "$DEST" ] && [ "$FORCE" -eq 0 ]; then
-  if cmp -s "$SRC" "$DEST"; then
+  # Compare what WOULD be installed, not the raw template: the installed copy has its PIPELINE_DIR rewritten to this
+  # kit's prefix, so comparing the template reported "a different hook exists" for every kit not at .pipeline/.
+  if cmp -s "$RENDERED" "$DEST"; then
     echo "Already installed and identical: $DEST"
     exit 0
   fi
@@ -65,16 +80,7 @@ fi
 
 mkdir -p "$HOOKS"
 
-# Point the installed copy at wherever the kit actually is. A hook runs with
-# the repo root as its cwd and inherits no environment from whoever pushes, so
-# this has to be baked in at install time — and the installed hook is local
-# config rather than a shipped artifact, so baking it in is the right place. An
-# empty prefix means the kit IS the repository, which is how this repo runs the
-# hook on itself.
-PREFIX="$(git -C "$KIT" rev-parse --show-prefix 2>/dev/null)"
-PREFIX="${PREFIX%/}"
-[ -n "$PREFIX" ] || PREFIX="."
-sed "s|^PIPELINE_DIR=\"\${PIPELINE_DIR:-.pipeline}\"|PIPELINE_DIR=\"\${PIPELINE_DIR:-$PREFIX}\"|" "$SRC" > "$DEST"
+cat "$RENDERED" > "$DEST"
 
 chmod +x "$DEST" 2>/dev/null || true
 

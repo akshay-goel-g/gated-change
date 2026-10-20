@@ -70,6 +70,14 @@ redesigns, recorded in `ledger.jsonl`.
 
 ### Fixed
 
+- **Small quality fixes (ACTION-PLAN B1-B6).**
+  - *B1* The 25 macOS CI failures were test-harness portability in `tests/run.sh` (GNU `sed -i EXPR FILE`, padded `wc -w`), not product bugs; the tests now use portable helpers. Confirm on a real macOS run.
+  - *B2* The R0c edit hook matched the ABSOLUTE path against repo-relative rules, so a file in another project's `auth/`, or any file of a repository checked out under a directory called `core/`, tripped a rule. It now decides membership by directory identity and matches the path relative to the repo root; files outside the repository are ignored.
+  - *B3* `install-hook.sh` compared the template with the installed copy (whose `PIPELINE_DIR` it had rewritten), so a re-run said "a different hook exists" for any kit not at `.pipeline/`. It now compares what would be installed.
+  - *B4* `ledger.sh escape` matched the change name as a regex (`a.b` found gate runs logged for `aXb`); it is a fixed-string match on the escaped name now.
+  - *B5* CI pins `actions/checkout` to a commit (v4.4.0), and a test keeps every action pinned.
+  - *B6* `status.sh` reports, advisory only, when `project/registry.md`, `project/map.md` or the mined draft is `REGISTRY_STALE_COMMITS` (default 100, 0 = off) or more commits behind HEAD; `mine-registry.sh` stamps the commit it ran at. **Action required (existing installs):** none; `update-kit.sh` brings all of B2-B4 and B6 (they are in `tools/`).
+
 - **One-time text scrub of `ledger.jsonl` for publication (an exception to "append-only; supersede, never edit").**
   Eight existing lines had the name of a retired third-party vendor in their free-text `note` / `claim` fields;
   those words were reworded. No other field of any row

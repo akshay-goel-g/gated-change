@@ -1321,7 +1321,9 @@ cmd_escape() {
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$(json_escape "$change")" "$(json_escape "$found_by")" "$(json_escape "$severity")" "$(json_escape "$note")")" \
     "logged: escape on $change — found by $found_by"
 
-  if ! grep -q "\"type\":\"gate\".*\"change\":\"$change\"" "$LEDGER" 2>/dev/null; then
+  # A fixed-string match on the JSON-escaped name: as a regex, a `.` in the change name matched any character (so
+  # `a.b` found gate runs logged for `aXb`), and `[` or `*` made it mean something else or fail to compile.
+  if ! grep '"type":"gate"' "$LEDGER" 2>/dev/null | grep -qF "\"change\":\"$(json_escape "$change")\""; then
     echo "  note: no gate runs recorded for '$change'. If it never went through the"
     echo "        pipeline this is baseline, not an escape — escape rate only means"
     echo "        something for changes that actually ran the gates."
