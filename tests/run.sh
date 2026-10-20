@@ -8759,6 +8759,21 @@ test_c3_the_ok_lines_say_what_they_do_not_prove() {
   run led verify --against HEAD; assert_exit 0; assert_contains "not anchored by this check"
 }
 
+# B4: `escape` decided whether a change "ever ran the gates" with the change name pasted into a regex.
+test_escape_note_about_missing_gate_runs_matches_the_change_name_literally() {
+  newrepo
+  led add --change aXb --gate G4 --tier T2 --round 1 --outcome pass --confidence fresh --model m >/dev/null 2>&1
+  run led escape --change "a.b" --found-by user --severity high
+  assert_exit 0
+  assert_contains "no gate runs recorded for 'a.b'"
+  run led escape --change "aXb" --found-by user --severity high
+  assert_exit 0
+  assert_not_contains "no gate runs recorded"
+  run led escape --change "a[b" --found-by user --severity high
+  assert_exit 0
+  assert_contains "no gate runs recorded for 'a[b'"
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1
