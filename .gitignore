@@ -7,3 +7,6 @@ dist/
 # Local Claude Code state
 .claude/settings.local.json
 .claude/worktrees/
+
+# Private working plan: kept locally, not published
+ACTION-PLAN.md
