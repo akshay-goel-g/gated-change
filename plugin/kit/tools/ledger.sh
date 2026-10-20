@@ -2528,8 +2528,9 @@ cmd_report() {
   # ---- Leading indicator: available from day one ----
   local routes under over match
   # A re-run of the same reconcile (same base, commit, prediction) differs only by its date; counting
-  # both made one misclassification read as two in the miss rate.
-  local uroutes; uroutes="$(grep '"type":"route"' "$LEDGER" | sed 's/"date":"[^"]*",//' | sort -u)"
+  # both made one misclassification read as two in the miss rate. (The chain's "prev" differs on every record, so it
+  # is stripped too.)
+  local uroutes; uroutes="$(grep '"type":"route"' "$LEDGER" | sed -e 's/"date":"[^"]*",//' -e 's/,"prev":"[0-9a-f]*"}$/}/' | sort -u)"
   routes=$(printf '%s\n' "$uroutes" | grep -c '"type":"route"')
   echo
   echo "LEADING — reconcile miss rate"

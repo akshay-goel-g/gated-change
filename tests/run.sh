@@ -2610,7 +2610,8 @@ test_emit_with_no_summary_still_reports_success_after_a_real_write() {
   run bash -c "LEDGER='$(ledger_path)'; . '$fns'; emit '{\"type\":\"gate\"}'"
   rm -f "$fns"
   assert_exit 0 "a real write with no summary argument must not be reported as a failure"
-  assert_file_contains "$(ledger_path)" '{"type":"gate"}'
+  # the record lands, with its chain link appended as the last key
+  assert_file_contains "$(ledger_path)" '{"type":"gate","prev":"'
 }
 
 # G7 Threat round 3: the non-regular-file guard above now catches the
