@@ -136,6 +136,16 @@ $(sed 's/^/          /' "$f" 2>/dev/null)"
   fi
 }
 
+# ---------------------------------------------------------------- portable file edits
+# `sed -i EXPR FILE` means different things to GNU sed (no suffix argument) and BSD sed on macOS (the next argument is a
+# suffix, so the expression is read as one and fails with "invalid command code"). `-i.bak` plus deleting the backup works
+# on both. The expression must itself be portable: no \r, no `2a text` on one line (use sedi_crlf / sedi_after below).
+sedi() { local last; for last; do :; done; sed -i.sedibak "$@" && rm -f "$last.sedibak"; }
+# Every line ends CRLF (what a Windows checkout does). BSD sed does not understand \r in a replacement.
+sedi_crlf() { awk '{ printf "%s\r\n", $0 }' "$1" > "$1.sedibak" && cat "$1.sedibak" > "$1" && rm -f "$1.sedibak"; }
+# Insert TEXT as a new line after line N. BSD sed's `Na text` form needs a newline; awk does not.
+sedi_after() { awk -v n="$1" -v t="$2" '{ print } NR == n { print t }' "$3" > "$3.sedibak" && cat "$3.sedibak" > "$3" && rm -f "$3.sedibak"; }
+
 # ---------------------------------------------------------------- json
 PY=""
 for c in python3 python; do command -v "$c" >/dev/null 2>&1 && { PY="$c"; break; }; done
@@ -1089,7 +1099,7 @@ _fake_commit() {
   local fake="$1"; shift
   led add "$@" >/dev/null 2>&1
   local n; n="$(wc -l < "$(ledger_path)" | tr -d ' ')"
-  sed -i "${n}s/\"commit\":\"[0-9a-f]*\"/\"commit\":\"$fake\"/" "$(ledger_path)"
+  sedi "${n}s/\"commit\":\"[0-9a-f]*\"/\"commit\":\"$fake\"/" "$(ledger_path)"
 }
 
 _pass_all_t4() {
@@ -1470,7 +1480,7 @@ test_compliance_says_so_when_a_pass_commit_is_not_in_this_clone() {
   _e3_repo
   led route --change c --predicted T4 --actual T4 --reason r --base "$E3_BASE" >/dev/null 2>&1
   _pass_all_t4 1
-  sed -i '/"type":"gate"/s/"commit":"[0-9a-f]*"/"commit":"deadbeefdeadbeef"/' "$(ledger_path)"
+  sedi '/"type":"gate"/s/"commit":"[0-9a-f]*"/"commit":"deadbeefdeadbeef"/' "$(ledger_path)"
   run led compliance --change c --tier T4
   assert_contains "not checkable here"
 }
@@ -1545,7 +1555,7 @@ test_matrix_reads_footnotes_including_wrapped_ones() {
 # is optional; both are needed to actually close "router unreadable".
 test_matrix_load_refuses_a_single_malformed_row() {
   newrepo
-  sed -i 's/| \*\*G7 · Threat\*\* |.*/| **G7 · Threat** | Security engineer | 20 min |/' \
+  sedi 's/| \*\*G7 · Threat\*\* |.*/| **G7 · Threat** | Security engineer | 20 min |/' \
     "$REPO/.pipeline/core/01-router.md"
 
   # With one row malformed, the whole table is invalid (not "7 of 8 gates") —
@@ -1625,7 +1635,7 @@ test_matrix_load_refuses_a_fused_cell_row() {
   local router="$REPO/.pipeline/core/01-router.md"
   # Drop the pipe between G7's T3 ("M") and T4 ("**M (hard)**") cells,
   # fusing them into one — NF becomes 9, not <9, the exact gap this closes.
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M \*\*M (hard)\*\* |/' \
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M \*\*M (hard)\*\* |/' \
     "$router"
   grep -qF 'M **M (hard)** |' "$router" || _fail "fixture setup did not fuse the T3/T4 cells — router text may have drifted"
 
@@ -1645,7 +1655,7 @@ test_matrix_load_refuses_a_fused_cell_row() {
 test_matrix_load_refuses_a_row_with_a_blank_cell() {
   newrepo
   local router="$REPO/.pipeline/core/01-router.md"
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M |  |/' \
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M |  |/' \
     "$router"
   grep -qF '| M |  |' "$router" || _fail "fixture setup did not blank the T4 cell — router text may have drifted"
 
@@ -1671,7 +1681,7 @@ test_matrix_load_refuses_a_row_with_a_blank_cell() {
 test_matrix_load_refuses_a_content_shifted_row() {
   newrepo
   local router="$REPO/.pipeline/core/01-router.md"
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security | engineer | 20 min | — | — | R⁴ | M \*\*M (hard)\*\* |/' \
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security | engineer | 20 min | — | — | R⁴ | M \*\*M (hard)\*\* |/' \
     "$router"
   grep -qF 'M **M (hard)** |' "$router" || _fail "fixture setup did not fuse the T3/T4 cells — router text may have drifted"
 
@@ -1725,7 +1735,7 @@ test_matrix_load_refuses_a_tier_column_with_no_mandate() {
 test_matrix_load_refuses_a_cell_swap_within_a_row() {
   newrepo
   local router="$REPO/.pipeline/core/01-router.md"
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | **M (hard)** | R⁴ | M | — |/' "$router"
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | **M (hard)** | R⁴ | M | — |/' "$router"
   grep -qF '| — | **M (hard)** | R⁴ | M | — |' "$router" || _fail "fixture setup did not swap G7's T1/T4 cells — router text may have drifted"
 
   local out
@@ -1749,7 +1759,7 @@ test_matrix_load_refuses_a_cell_swap_within_a_row() {
 test_matrix_load_refuses_a_single_cell_downgrade() {
   newrepo
   local router="$REPO/.pipeline/core/01-router.md"
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M | R |/' "$router"
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M | R |/' "$router"
   grep -qF '| R⁴ | M | R |' "$router" || _fail "fixture setup did not downgrade G7's T4 cell — router text may have drifted"
 
   local out
@@ -1784,7 +1794,7 @@ test_matrix_load_refuses_when_lock_file_missing() {
 test_matrix_freeze_regenerates_a_working_reference() {
   newrepo
   local router="$REPO/.pipeline/core/01-router.md"
-  sed -i 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M | R |/' "$router"
+  sedi 's/| \*\*G7 · Threat\*\* | Security engineer | 20 min | — | — | R⁴ | M | \*\*M (hard)\*\* |/| **G7 · Threat** | Security engineer | 20 min | — | — | R⁴ | M | R |/' "$router"
 
   ( cd "$REPO" && bash .pipeline/tools/lib/matrix.sh --freeze ) >/dev/null 2>&1
 
@@ -3619,7 +3629,7 @@ test_hook_blocks_moving_a_trust_file_and_editing_it_in_the_same_commit() {
   local base; base="$(git -C "$REPO" rev-parse HEAD)"
   mkdir -p "$REPO/src/legacy"
   git -C "$REPO" mv src/auth/big.js src/legacy/big.js >/dev/null 2>&1
-  sed -i '5d' "$REPO/src/legacy/big.js"; printf 'exportAll()\n' >> "$REPO/src/legacy/big.js"
+  sedi '5d' "$REPO/src/legacy/big.js"; printf 'exportAll()\n' >> "$REPO/src/legacy/big.js"
   git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "move and weaken" >/dev/null 2>&1
   run bash -c "cd '$REPO' && printf 'refs/heads/master %s refs/heads/master %s\n' \"\$(git rev-parse HEAD)\" '$base' | TRUST='^src/auth/' sh .pipeline/templates/pre-push"
   assert_exit 1 "a move that also edits the file must not hide the edit"
@@ -3726,7 +3736,7 @@ test_hook_octopus_merge_that_reverts_a_pushed_trust_change_is_blocked() {
   printf 'base\n' > "$REPO/src/auth/x.js"
   git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "M octopus reverts Y" >/dev/null 2>&1
   local m; m="$(git -C "$REPO" rev-parse HEAD)"
-  assert_eq 4 "$(git -C "$REPO" rev-list --parents -n1 "$m" | wc -w)" "is an octopus"
+  assert_eq 4 "$(git -C "$REPO" rev-list --parents -n1 "$m" | wc -w | tr -d ' ')" "is an octopus"
   mkdir -p "$REPO/.pipeline/security-reports"
   printf 'reviewed %s\n' "$s1" > "$REPO/.pipeline/security-reports/g7.md"
   run hook_stdin refs/heads/master "$m" refs/heads/master "$r1"
@@ -6875,7 +6885,7 @@ test_dashboard_check_passes_on_a_consistent_kit() {
 test_dashboard_check_catches_a_diverged_loop_diagram() {
   newrepo
   # Remove one step from README's loop, leaving 00-start.md's intact.
-  sed -i '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md" 2>/dev/null \
+  sedi '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md" 2>/dev/null \
     || sed -i '' '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md"
   run bash -c "cd '$REPO' && bash .pipeline/tools/dashboard.sh --check"
   assert_exit 1
@@ -6891,7 +6901,7 @@ test_dashboard_check_catches_a_diverged_loop_diagram() {
 test_dashboard_check_catches_a_drifted_budget_index() {
   newrepo
   # Bump G5's budget in the 02-gates.md prose index only; the router keeps 30m.
-  sed -i 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md" 2>/dev/null \
+  sedi 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md" 2>/dev/null \
     || sed -i '' 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md"
   run bash -c "cd '$REPO' && bash .pipeline/tools/dashboard.sh --check"
   assert_exit 1 "a budget stated two ways must fail the check"
@@ -8381,11 +8391,11 @@ test_c3_verify_catches_an_edit_a_deletion_and_an_insertion() {
   newrepo
   c3_route 1; c3_route 2; c3_route 3; c3_route 4
   local f; f="$(ledger_path)"; cp "$f" "$f.good"
-  sed -i '2s/chain test 2/EDITED/' "$f"
+  sedi '2s/chain test 2/EDITED/' "$f"
   run led verify; assert_exit 1 "an edited line"; assert_contains "BREAK  record 3"
-  cp "$f.good" "$f"; sed -i '2d' "$f"
+  cp "$f.good" "$f"; sedi '2d' "$f"
   run led verify; assert_exit 1 "a deleted line"; assert_contains "BREAK"
-  cp "$f.good" "$f"; sed -i '2a {"type":"note"}' "$f"
+  cp "$f.good" "$f"; sedi_after 2 '{"type":"note"}' "$f"
   run led verify; assert_exit 1 "an inserted unchained line"; assert_contains "no \"prev\""
 }
 
@@ -8395,7 +8405,7 @@ test_c3_a_legacy_prefix_is_fine_and_a_tail_truncation_needs_the_pinned_head() {
   run led verify; assert_exit 0 "legacy lines before any chained line are fine"; assert_contains "2 legacy"
   c3_route 1; c3_route 2
   local head; head="$(c3_head)"
-  sed -i '$d' "$(ledger_path)"
+  sedi '$d' "$(ledger_path)"
   run led verify; assert_exit 0 "without a pinned head a truncated tail is invisible"
   run led verify --expect-head "$head"; assert_exit 1; assert_contains "--expect-head"
 }
@@ -8419,7 +8429,7 @@ test_c3_two_branches_concatenated_are_a_join_not_a_break() {
 test_c3_a_crlf_checkout_still_verifies() {
   newrepo
   c3_route 1; c3_route 2
-  sed -i 's/$/\r/' "$(ledger_path)"
+  sedi_crlf "$(ledger_path)"
   run led verify
   assert_exit 0 "line endings are not tampering"
 }
@@ -8433,8 +8443,8 @@ test_c3_a_forged_or_edited_record_cannot_pass_as_a_join() {
   awk -v h="$h1" 'NR==2{print; print "{\"type\":\"forged\",\"prev\":\"" h "\"}"; next}1' "$f.good" > "$f"
   run led verify; assert_exit 1 "a forged insert"; assert_contains "BREAK"
   # an edit, with the downstream prevs rewritten to an old hash
-  cp "$f.good" "$f"; sed -i '3s/chain test 3/EVIL/' "$f"
-  sed -i -E "4s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/;5s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/" "$f"
+  cp "$f.good" "$f"; sedi '3s/chain test 3/EVIL/' "$f"
+  sedi -E "4s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/;5s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/" "$f"
   run led verify; assert_exit 1 "an edit with cheap prev rewrites"; assert_contains "BREAK"
   # A byte-for-byte copy of an existing record has the same hash, so it is a BREAK wherever it sits.
   cp "$f.good" "$f"; sed -n 2p "$f.good" >> "$f"
@@ -8463,7 +8473,7 @@ test_c3_stripping_every_prev_is_caught_only_against_git() {
   c3_route 1; c3_route 2; c3_route 3
   git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
   local f; f="$(ledger_path)"
-  sed -i -E 's/,"prev":"[0-9a-f]+"\}$/}/' "$f"
+  sedi -E 's/,"prev":"[0-9a-f]+"\}$/}/' "$f"
   run led verify; assert_exit 0 "plain verify reads a stripped ledger as all-legacy"; assert_contains "3 legacy"
   run led verify --against HEAD; assert_exit 1 "committed history is the anchor"; assert_contains "NOT a prefix"
   git -C "$REPO" checkout -q -- "$f"
@@ -8471,7 +8481,7 @@ test_c3_stripping_every_prev_is_caught_only_against_git() {
   assert_not_contains "unpinned and unanchored"
   c3_route 4
   run led verify --against HEAD; assert_exit 0 "new records after the commit are fine"
-  sed -i '$d' "$f"; sed -i '$d' "$f"
+  sedi '$d' "$f"; sedi '$d' "$f"
   run led verify --against HEAD; assert_exit 1 "a truncation into committed records"
   run led verify --against no-such-rev; assert_exit 2
 }
@@ -8517,7 +8527,7 @@ test_c3_a_matching_pinned_head_passes_and_a_stale_one_fails() {
 test_c3_a_record_written_after_a_crlf_conversion_still_chains() {
   newrepo
   c3_route 1; c3_route 2
-  sed -i 's/$/\r/' "$(ledger_path)"
+  sedi_crlf "$(ledger_path)"
   c3_route 3
   run led verify
   assert_exit 0 "the writer must hash the CRLF last line the way verify does"
