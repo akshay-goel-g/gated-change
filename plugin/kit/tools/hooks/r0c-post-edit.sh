@@ -40,9 +40,10 @@ INPUT="$(cat)"
 
 # Same idiom every JSON-reading tool in this kit already uses (tools/dashboard.sh,
 # tools/ledger.sh): sed extraction of one known top-level key, not a parser. Safe
-# here because tool_input.file_path is always the FIRST "file_path" key in an
-# Edit/Write/MultiEdit payload, and Claude Code never puts a literal `"` in it
-# (it is a filesystem path, not free text).
+# here because an Edit/Write/MultiEdit payload carries one "file_path" key, in compact
+# JSON, and Claude Code never puts a literal `"` in a path. The greedy `.*` takes the
+# LAST such key if a payload ever had two; pretty-printed JSON (a space after the
+# colon) or a quote inside a path fails OPEN, silently, which this hook accepts as a nudge.
 TOOL_NAME="$(printf '%s' "$INPUT" | sed -n 's/.*"tool_name":"\([^"]*\)".*/\1/p')"
 case "$TOOL_NAME" in
   Edit|Write|MultiEdit) ;;
@@ -78,25 +79,44 @@ SHOWN_PATH="$FILE_PATH"
 # out whether the file is inside THIS repository, and match its path relative to the repository root.
 #
 # Membership is decided by directory identity (`-ef`: same device and inode), not by comparing strings, because the
-# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, a symlinked checkout) need not match
+# payload's spelling (`D:/work/x`, `/d/work/x`, a different drive-letter case, the repo ROOT reached through a symlink or junction) need not match
 # the spelling git gives for the root, and a mismatch here would turn the hook silently off, the failure this file
 # already had once. Walk up from the file to the first ancestor that IS the root, collecting the names passed on the
 # way (the file's own directories may not exist yet: a Write can create them). Not found = outside the repository.
+# Limits, all fail-open: only the ROOT is compared by identity, so a symlink or junction INSIDE the repository that
+# points at a guarded directory is not resolved; the rule match is case-sensitive; the walk stops after 100 segments;
+# and `-e` on every ancestor means a path on an unreachable network share (UNC) can stall the hook until the OS gives up.
 case "$FILE_PATH" in
   /*|[A-Za-z]:*)
     REPO_ROOT="$(git -C "$KIT" rev-parse --show-toplevel 2>/dev/null)"
     if [ -n "$REPO_ROOT" ]; then
-      _rel=""; _p="$FILE_PATH"; _found=0
-      while :; do
-        if [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
-        _parent="$(dirname "$_p")"
-        case "$_parent" in ""|"."|"$_p") break;; esac
-        _rel="$(basename "$_p")${_rel:+/$_rel}"
-        _p="$_parent"
+      # Parameter expansion only, no dirname/basename: those fork once per segment, and a very deep path made one edit
+      # stall for minutes. The depth is capped too (a path deeper than 100 segments is not a source file).
+      _rel=""; _p="${FILE_PATH%/}"; _found=0; _depth=0
+      while [ "$_depth" -lt 100 ]; do
+        _depth=$((_depth + 1))
+        if [ -n "$_p" ] && [ -e "$_p" ] && [ "$_p" -ef "$REPO_ROOT" ]; then _found=1; break; fi
+        case "$_p" in */*) ;; *) break;; esac
+        _seg="${_p##*/}"; _parent="${_p%/*}"
+        [ -n "$_parent" ] || _parent="/"
+        [ "$_parent" != "$_p" ] || break
+        _rel="${_seg}${_rel:+/$_rel}"; _p="$_parent"
       done
       [ "$_found" = 1 ] || exit 0          # outside this repository: not our surfaces
       [ -n "$_rel" ] || exit 0             # the root itself
-      FILE_PATH="$_rel"
+      # Collapse `.` and `x/..` so a spelling like tools/./ledger.sh or tools/x/../ledger.sh still meets its rule.
+      _norm=""; _old_ifs="$IFS"; IFS=/
+      set -f
+      for _seg in $_rel; do
+        case "$_seg" in
+          ""|".") ;;
+          "..") case "$_norm" in */*) _norm="${_norm%/*}";; *) _norm="";; esac ;;
+          *) _norm="${_norm:+$_norm/}$_seg" ;;
+        esac
+      done
+      set +f; IFS="$_old_ifs"
+      [ -n "$_norm" ] || exit 0
+      FILE_PATH="$_norm"
     fi
     ;;
 esac

@@ -1323,7 +1323,13 @@ cmd_escape() {
 
   # A fixed-string match on the JSON-escaped name: as a regex, a `.` in the change name matched any character (so
   # `a.b` found gate runs logged for `aXb`), and `[` or `*` made it mean something else or fail to compile.
-  if ! grep '"type":"gate"' "$LEDGER" 2>/dev/null | grep -qF "\"change\":\"$(json_escape "$change")\""; then
+  #
+  # Counted with `grep -c`, never `grep ... | grep -q`: this file runs under `pipefail`, `grep -q` quits at its first
+  # match, the upstream grep then dies of SIGPIPE (141), and the whole pipeline reads as "no match" -- a false
+  # "no gate runs recorded" on any ledger bigger than a pipe buffer (this repository's own is).
+  local _gate_runs
+  _gate_runs="$(grep -F "\"change\":\"$(json_escape "$change")\"" "$LEDGER" 2>/dev/null | grep -c '"type":"gate"')"
+  if [ "${_gate_runs:-0}" -eq 0 ]; then
     echo "  note: no gate runs recorded for '$change'. If it never went through the"
     echo "        pipeline this is baseline, not an escape — escape rate only means"
     echo "        something for changes that actually ran the gates."

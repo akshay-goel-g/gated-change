@@ -449,7 +449,7 @@ if [ -n "$STALE_INPUT" ]; then
   say "  STALE INPUT (advisory)"
   say "  ----------------------"
   [ "$QUIET" -eq 1 ] || printf '%s' "$STALE_INPUT"
-  say "  G4 Ripple reads these. Re-read them against what changed since, then touch them (or re-mine:"
+  say "  G4 Ripple reads these. Re-read them against what changed since, then COMMIT them (or re-mine:"
   say "    bash $KIT/tools/mine-registry.sh). Threshold: REGISTRY_STALE_COMMITS=$_stale_n commits (0 = off)."
 fi
 
