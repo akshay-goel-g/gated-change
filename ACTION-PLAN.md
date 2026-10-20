@@ -1,6 +1,6 @@
 # Action plan: public release, hardening, multi-surface fit
 
-Status: **nothing started.** Written 2026-10-06 from two Opus subagent code reviews plus
+Status 2026-10-20: **sections A, E, I, J, K and C are done** (see each section; C1-C3 are merged into the local branch `integration`, not yet into `master`, because the plugin is in the directory review and `master` must not be pushed meanwhile). B, D, F, G, H, K-7 and the unfixed bits below are open. Written 2026-10-06 from two Opus subagent code reviews plus
 the original competitor comparison. Findings marked *inferred* were not tested.
 Commit each workstream separately (A, B, C, D) per the scope-separation rule.
 
@@ -47,9 +47,9 @@ Verify: `git grep -n -i -E "<drive-folder>|<username>|<project-name>"` returns n
 
 | # | Item | Why it is worth doing |
 |---|---|---|
-| C1 | **Gate evidence is not validated.** `compliance` never reads `evidence` or `action` (ledger.sh:1210-1508). A pass with zero findings and `--confidence fresh` satisfies a mandate with no citation | This undercuts the headline claim, so fix it before leading with that claim. Design below |
-| C2 | **Stop hook running `compliance`** for the active T3/T4 change | The Claude hook is advisory (PostToolUse exit 2 cannot block). The first real gate is pre-push, after a whole session of ungated T4 work. Design below |
-| C3 | Ledger tamper-evidence: `prev` sha256 per line plus `ledger.sh verify` | `emit()` is a plain append (ledger.sh:295-350); the `kit` field is a CRC32 and does not chain records |
+| C1 | **DONE 2026-10-20 (branch `integration`)** · `ledger.sh add` refuses a fresh T3/T4 or untiered pass that cites nothing: an `info` finding with a real in-repo file:line, `--evidence file:line`, or `--evidence-cmd EVIDENCE::<name>` (a committed `project/commands.conf` line the tool runs; exit 0 and output required; exit code and hashes recorded). Gate rounds 1-5, compliance exit 0. Known limits: a citation proves existence, not relevance; commands may run uncommitted files; the T4 row for `commands.conf` ships commented out in the template · **Gate evidence is not validated.** `compliance` never reads `evidence` or `action` (ledger.sh:1210-1508). A pass with zero findings and `--confidence fresh` satisfies a mandate with no citation | This undercuts the headline claim, so fix it before leading with that claim. Design below |
+| C2 | **DONE 2026-10-20 (branch `integration`)** · `tools/hooks/stop-compliance.sh`, registered by `install-claude-hook.sh`: blocks ending a session while the latest T3/T4 route fails `compliance` (once per stop, capped per unchanged state, fail-open, `PIPELINE_STOP_HOOK=off`). `tests/stop-hook-e2e.sh`. Known limit: the active change is just the last route; not tried in a live session · **Stop hook running `compliance`** for the active T3/T4 change | The Claude hook is advisory (PostToolUse exit 2 cannot block). The first real gate is pre-push, after a whole session of ungated T4 work. Design below |
+| C3 | **DONE 2026-10-20 (branch `integration`)** · every record ends with `prev` (sha256 of the previous non-blank line); `ledger.sh verify [--allow-joins] [--expect-head] [--against]`; writers serialised by a lock directory. Six gate rounds, full suite 1622 passed. Honest limits (documented): authenticates order not authors; a record inserted with a correct link looks like a merged branch; one side of a JOIN, the last record, a stripped chain, the legacy prefix and a recomputed tail need `--expect-head` / `--against`. CI runs `verify --allow-joins` · Ledger tamper-evidence: `prev` sha256 per line plus `ledger.sh verify` | `emit()` is a plain append (ledger.sh:295-350); the `kit` field is a CRC32 and does not chain records |
 
 **C1 design.**
 - New `commands.conf` parser, since nothing parses or runs it today. Key by `KIND::TARGET`; do not use bare names, because TARGET labels contain spaces and slashes.
