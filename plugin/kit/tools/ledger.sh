@@ -316,7 +316,9 @@ refuse_branchy_change() {
 # gate reviewers logging to one ledger is a normal shape) would link to the same predecessor and leave a break
 # that can never be repaired. The read-hash-append is serialised with an atomic directory lock next to the ledger.
 # A lock older than two minutes is a crashed writer's and is broken (two waiters breaking the same dead lock at the
-# same instant can still both proceed: that needs a killed writer AND a race, and is the one hole left). Waiting gives
+# same instant can still both proceed, and a writer that outlives the stale age -- a suspended process, a slow or
+# network filesystem -- can lose its lock to a waiter and then unlock the waiter's: both are rare and neither can be
+# repaired afterwards). Waiting gives
 # up after LEDGER_LOCK_WAIT seconds (default 150) with the rmdir remedy named.
 ledger_unlock() { rmdir "$LEDGER.lock" 2>/dev/null; return 0; }
 ledger_lock() {
@@ -351,7 +353,8 @@ ledger_line_hash() { tr -d '\r' | _matrix_hash; }
 # an editor must not become part of the chain), or 64 zeros when there is none. Fails when no hash tool exists.
 ledger_prev_hash() {
   local last
-  last="$(tr -d '\r' < "$LEDGER" 2>/dev/null | awk '$0 !~ /^[[:space:]]*$/ { l = $0 } END { print l }')"
+  last=""
+  [ -f "$LEDGER" ] && last="$(tr -d '\r' < "$LEDGER" | awk '$0 !~ /^[[:space:]]*$/ { l = $0 } END { print l }')"
   if [ -n "$last" ]; then
     printf '%s\n' "$last" | ledger_line_hash
   else
@@ -2708,7 +2711,7 @@ cmd_verify() {
     tr -d '\r' < "$LEDGER" > "$tmp/new"
     size="$(wc -c < "$tmp/old" | tr -d ' ')"
     if head -c "$size" "$tmp/new" | cmp -s - "$tmp/old" && [ "$(wc -c < "$tmp/new" | tr -d ' ')" -ge "$size" ]; then
-      echo "against $against: the committed ledger ($size bytes) is an exact prefix of this one"
+      echo "against $against: the committed ledger ($size bytes) is an exact prefix of this one (records added after $against are not anchored by this check)"
     else
       breaks=1; echo "  BREAK  the ledger as committed in $against is NOT a prefix of this one (a committed record was edited, stripped or truncated)"
     fi
@@ -2719,7 +2722,7 @@ cmd_verify() {
   echo "verify: OK"
   if [ -z "$against" ]; then
     if [ -z "$expect_head" ]; then
-      echo "  (unpinned and unanchored: this does not detect an edited last record, a truncated tail, a ledger with every prev stripped, edits to the legacy prefix, or the removal of one side of a JOIN. Use --expect-head <hash> and/or --against <rev>.)"
+      echo "  (unpinned and unanchored: this proves the chain is internally consistent, not that nobody rewrote it. It does not detect an edit followed by recomputing every later prev, an edited last record, a truncated tail, a ledger with every prev stripped, edits to the legacy prefix, or the removal of one side of a JOIN. Use --expect-head <hash> and/or --against <rev>.)"
     else
       echo "  (tail pinned only: --expect-head does not cover the legacy prefix, a stripped chain, or one side of a JOIN. Add --against <rev> for those.)"
     fi
@@ -2736,7 +2739,12 @@ case "${1:-}" in
   gates)      shift; cmd_gates "$@";;
   compliance) shift; require_ledger; cmd_compliance "$@";;
   verify)     shift
-              if [ -f "$LEDGER" ] && [ ! -s "$LEDGER" ]; then echo "Ledger at $LEDGER is empty: nothing to verify."; exit 0; fi
+              if [ -f "$LEDGER" ] && [ ! -s "$LEDGER" ]; then
+                # With no pin the empty file is just "nothing to verify". With --expect-head or --against it is a
+                # TRUNCATION to zero bytes and must reach the checks that exist to catch exactly that.
+                if [ "$#" -eq 0 ]; then echo "Ledger at $LEDGER is empty: nothing to verify."; exit 0; fi
+                cmd_verify "$@"
+              fi
               require_ledger; cmd_verify "$@";;
   # Bare invocation (no subcommand at all) prints the header as usage — that is
   # a real help request. A TYPO'D subcommand is not: G8 Dogfood round 1 found

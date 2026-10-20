@@ -8646,6 +8646,25 @@ test_c3_a_stale_lock_that_cannot_be_removed_ends_in_a_refusal_not_a_hang() {
   rm -f "$lock"
 }
 
+test_c3_truncating_to_zero_bytes_cannot_slip_past_a_pin_or_an_anchor() {
+  newrepo
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  : > "$(ledger_path)"
+  run led verify; assert_exit 0 "no pin: an empty ledger is just nothing to verify"; assert_contains "nothing to verify"
+  run led verify --expect-head "$head"; assert_exit 1 "the pinned head catches a truncation to zero bytes"; assert_contains "BREAK"
+  run led verify --against HEAD; assert_exit 1 "so does the git anchor"; assert_contains "NOT a prefix"
+}
+
+test_c3_the_ok_lines_say_what_they_do_not_prove() {
+  newrepo
+  c3_route 1
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  run led verify; assert_exit 0; assert_contains "recomputing every later prev"
+  run led verify --against HEAD; assert_exit 0; assert_contains "not anchored by this check"
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1
