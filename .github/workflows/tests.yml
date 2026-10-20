@@ -29,7 +29,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to a commit, not a tag: a tag can be moved after the fact, and this job runs the whole suite.
+      # actions/checkout v4.4.0. To bump: look up the new tag's commit sha and change both the sha and this comment.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0      # reconcile.sh and tools/lib/coverage.sh both walk
                               # real history; a shallow clone makes their tests

@@ -8774,6 +8774,16 @@ test_escape_note_about_missing_gate_runs_matches_the_change_name_literally() {
   assert_contains "no gate runs recorded for 'a[b'"
 }
 
+# B5: every third-party action in the workflows is pinned to a full commit sha (a tag can be moved after the fact).
+test_workflow_actions_are_pinned_to_a_commit_sha() {
+  local f bad=""
+  for f in "$KIT"/.github/workflows/*.yml; do
+    [ -f "$f" ] || continue
+    bad="$bad$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$f" | grep -vE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' | sed "s|^|$(basename "$f"): |")"
+  done
+  [ -z "$bad" ] && _ok || _fail "unpinned action reference(s): $bad"
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1
