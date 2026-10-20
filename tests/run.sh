@@ -7245,6 +7245,20 @@ test_mine_registry_is_graceful_on_a_young_repo() {
   assert_contains "Not enough history to mine"
 }
 
+# B6: the draft records the commit it was mined at, so its age can be measured later.
+test_mine_registry_stamps_the_commit_it_ran_at() {
+  newrepo
+  local i
+  for i in 1 2; do
+    printf 'v%s\n' "$i" > "$REPO/src/a.js"; printf 'v%s\n' "$i" > "$REPO/src/b.js"
+    git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "fix: a and b together ($i)" >/dev/null 2>&1
+  done
+  local head; head="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+  run bash -c "cd '$REPO' && bash .pipeline/tools/mine-registry.sh '$REPO/draft.md'"
+  assert_exit 0
+  assert_file_contains "$REPO/draft.md" "at commit $head from "
+}
+
 # E7: the draft belongs INSIDE the install (.pipeline/project), not at the repo root,
 # or the next step's `cp -r templates/project` nests into project/project.
 test_mine_registry_default_output_lands_inside_the_kit() {
@@ -8782,6 +8796,56 @@ test_workflow_actions_are_pinned_to_a_commit_sha() {
     bad="$bad$(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$f" | grep -vE 'uses:[[:space:]]*[^@[:space:]]+@[0-9a-f]{40}([[:space:]]|$)' | sed "s|^|$(basename "$f"): |")"
   done
   [ -z "$bad" ] && _ok || _fail "unpinned action reference(s): $bad"
+}
+
+# B6: curated inputs G4 reads (project/registry.md, project/map.md) and the mined draft are aged in COMMITS.
+_stale_commits() { local i; for i in $(seq 1 "$1"); do git -C "$REPO" commit -q --allow-empty -m "work $i" >/dev/null 2>&1; done; }
+status_stale() { ( cd "$REPO" && REGISTRY_STALE_COMMITS="$1" bash .pipeline/tools/status.sh ); }
+
+test_status_says_a_curated_input_is_many_commits_behind_head() {
+  newrepo
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "STALE INPUT (advisory)"
+  assert_contains "project/map.md: last changed 3 commit(s) ago"
+  # touching the file resets its age
+  printf '\n<!-- reviewed -->\n' >> "$REPO/.pipeline/project/map.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "map reviewed" >/dev/null 2>&1
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+}
+
+test_status_stale_input_is_silent_below_the_threshold_off_and_never_changes_the_exit_code() {
+  newrepo
+  _stale_commits 3
+  local plain code_plain code_stale
+  plain="$(status_stale 100 2>&1)"; code_plain=$?
+  case "$plain" in *"STALE INPUT"*) _fail "reported staleness below the threshold";; *) _ok;; esac
+  LAST_OUT="$(status_stale 0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "STALE INPUT"
+  status_stale 2 >/dev/null 2>&1; code_stale=$?
+  assert_eq "$code_plain" "$code_stale" "the advisory block must not move status.sh's exit code"
+}
+
+test_status_ages_a_mined_draft_by_the_commit_it_was_mined_at() {
+  newrepo
+  local first; first="$(git -C "$REPO" rev-parse --short=12 HEAD)"
+  printf '# Coupling registry — mined draft\n\n> Generated 2026-10-01 10:00 UTC at commit %s from 4 fix commits since "6 months ago".\n' "$first" \
+    > "$REPO/.pipeline/project/registry-draft.md"
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/registry-draft.md: mined 3 commit(s) ago ($first)"
+}
+
+test_status_does_not_age_an_untracked_or_unstamped_file() {
+  newrepo
+  rm -f "$REPO/.pipeline/project/map.md"; git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "drop map" >/dev/null 2>&1
+  printf 'notes\n' > "$REPO/.pipeline/project/map.md"                    # present but untracked
+  printf '# draft with no stamp\n' > "$REPO/.pipeline/project/registry-draft.md"
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+  assert_not_contains "registry-draft.md: mined"
 }
 
 test_c3_verify_refuses_unknown_options() {
