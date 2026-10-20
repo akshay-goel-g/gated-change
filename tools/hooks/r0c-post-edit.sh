@@ -106,7 +106,7 @@ case "$FILE_PATH" in
       for _seg in $_rel; do
         case "$_seg" in
           ""|".") ;;
-          "..") _norm="${_norm%/*}"; case "$_norm" in */*) ;; *) _norm="";; esac ;;
+          "..") case "$_norm" in */*) _norm="${_norm%/*}";; *) _norm="";; esac ;;
           *) _norm="${_norm:+$_norm/}$_seg" ;;
         esac
       done

@@ -4820,6 +4820,14 @@ test_r0c_hook_collapses_dot_and_dotdot_segments_before_matching() {
   assert_exit 2 "a cancelling .. must not hide a guarded file"
   run r0c_hook Edit "$REPO/src/auth/../theme.css"
   assert_exit 0 "and must not make an unguarded one look guarded"
+  # a pop from a TWO-segment prefix must leave the first segment: core/x/../y.js is core/y.js (a rule that needs the
+  # directory prefix), not y.js
+  run r0c_hook Edit "$REPO/core/x/../y.js"
+  assert_exit 2 "popping back to core/ must keep core/"
+  run r0c_hook Edit "$REPO/core/nonexistent/../y.js"
+  assert_exit 2
+  run r0c_hook Edit "$REPO/src/a/b/../../auth/existing.js"
+  assert_exit 2 "several pops in a row"
 }
 
 test_r0c_hook_does_not_stall_on_a_very_deep_path() {
