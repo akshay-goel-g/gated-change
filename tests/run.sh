@@ -8849,6 +8849,31 @@ test_status_stale_input_is_silent_below_the_threshold_off_and_never_changes_the_
   assert_eq "$code_plain" "$code_stale" "the advisory block must not move status.sh's exit code"
 }
 
+test_status_stale_threshold_is_inclusive_at_exactly_n_commits() {
+  newrepo
+  _stale_commits 3
+  LAST_OUT="$(status_stale 3 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/map.md: last changed 3 commit(s) ago"
+  LAST_OUT="$(status_stale 4 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/map.md: last changed"
+}
+
+test_status_ages_the_registry_only_when_it_holds_entries() {
+  newrepo
+  # the shipped TEMPLATE registry holds no entries: it is already reported as starved, not as stale
+  cp "$KIT/templates/project/registry.md" "$REPO/.pipeline/project/registry.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "empty registry" >/dev/null 2>&1
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "project/registry.md: last changed"
+  # give it one real entry, commit, let the repository move on
+  printf '\n| If you touch src/auth/ | also check src/session/ | sessions must be invalidated |\n' >> "$REPO/.pipeline/project/registry.md"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "registry entry" >/dev/null 2>&1
+  _stale_commits 3
+  LAST_OUT="$(status_stale 2 2>&1)"; LAST_EXIT=$?
+  assert_contains "project/registry.md: last changed 3 commit(s) ago"
+}
+
 test_status_ages_a_mined_draft_by_the_commit_it_was_mined_at() {
   newrepo
   local first; first="$(git -C "$REPO" rev-parse --short=12 HEAD)"
