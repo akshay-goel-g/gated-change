@@ -377,6 +377,33 @@ Ordered start list for the session:
 5. I-7 verification on a fresh clone, then I-8.
 6. Only then K (marketplace) and L (donation).
 
+## N. Planted-defect evals for the gates (added 2026-10-20; discuss, not started)
+
+Why: `tests/run.sh` and the e2e scripts prove the tooling works (routing, ledger, hooks, install).
+Nothing yet proves that a gate (for example G4 Ripple, G5 Proof, G7 Threat) actually *catches* a
+known defect on a given model. `core/08-models.md` maps gates to model tiers and says to re-check
+the mapping when a model changes, but today that depends on someone remembering. This is the useful
+part of the "re-run evals before a model swap" advice in the third-party accelerators page. The
+rest of that page (agent template / MCP server / eval-suite packaging, hard-pinned model IDs) was
+reviewed 2026-10-20 and **rejected**: it is not an Anthropic standard, it describes Claude
+integrations while this kit governs how agent-written changes are reviewed, and an MCP or SDK
+dependency would break "bash and git only".
+
+Do not start before the directory review (K-6) returns; none of this touches the plugin folder
+until then.
+
+| # | Item | Effort |
+|---|---|---|
+| N1 | Design a small case format: a tiny fixture repo or diff with one **planted defect**, the gate that should catch it, and the expected outcome (finding present, with file and class). One case per gate to start with, T4-relevant gates first (G4, G5, G7). Keep fixtures out of `plugin/` and out of `dist/` | S |
+| N2 | A runner that dispatches the gate on a stated model tier and records pass/fail through the existing ledger fields (`model`, `tokens`, `outcome`). Build on `tools/benchmark` (`measure.sh`, `session-record.md`) instead of a new harness. Needs a live model, so it is a manual or scheduled run, not part of `tests/run.sh` | M |
+| N3 | Add false-positive cases (clean diffs the gate must pass), so a model that flags everything does not score well | S |
+| N4 | Wire into `08-models.md`: "re-run the planted-defect cases before changing a gate's tier or when a new model ships", and record the result next to the tier table | S |
+| N5 | Decide whether any of it ships in the plugin (K-7 covers `claude plugin eval` for the skills; N is about gate quality, which is a different question). Default: keep in the repo, do not ship | S |
+
+Honest limits to state in the docs: a few planted defects measure recall on those defects only, not
+general review quality; results vary run to run, so each case needs several runs and a threshold,
+not a single pass.
+
 ## Suggested order
 
 0. **Decided 2026-10-13:** fresh history (I) and PolyForm Shield (J). Do I and the J commit together as one rewrite, after M1 is settled. Then K (marketplace), then L (donation).
@@ -389,6 +416,7 @@ Ordered start list for the session:
 7. **D1, D2, D5, D8**, then **D3**.
 8. **G4-G5** measurement runs, then update the Status table.
 9. Final README wording per the honest-wording block in section D.
+10. **N** (planted-defect evals) after the directory review returns and G4-G5 measurement is in hand.
 
 ## Housekeeping notes
 
