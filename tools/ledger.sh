@@ -324,6 +324,7 @@ ledger_unlock() { rmdir "$LEDGER.lock" 2>/dev/null; return 0; }
 ledger_lock() {
   local dir start="$SECONDS" wait="${LEDGER_LOCK_WAIT:-150}"
   case "$wait" in ''|*[!0-9]*) wait=150;; esac
+  [ "${#wait}" -le 6 ] || wait=150
   dir="$(dirname "$LEDGER")"
   # A directory we cannot create the lock in is not "a stuck writer": say so at once.
   if [ ! -w "$dir" ]; then
@@ -2632,7 +2633,7 @@ cmd_verify() {
       if (match($0, /,"prev":"[0-9a-f]+"\}[ \t]*$/)) { prev = substr($0, RSTART + 9, RLENGTH - 9); sub(/"\}[ \t]*$/, "", prev) }
       print "P", n, prev > pf
       if ($0 ~ /^(<<<<<<<|=======|>>>>>>>)/) print "C", n > pf }
-    END { close(pf) }' < "$LEDGER" 2>/dev/null
+    END { close(pf) }' < "$LEDGER" 2>/dev/null || { echo "REFUSED: could not read the ledger records ($LEDGER unreadable, or no space for the temp files)." >&2; exit 2; }
   : >> "$tmp/p.txt"
   local sums="" nfiles
   nfiles="$(ls "$tmp/l" 2>/dev/null | wc -l | tr -d ' ')"
@@ -2742,7 +2743,7 @@ case "${1:-}" in
               if [ -f "$LEDGER" ] && [ ! -s "$LEDGER" ]; then
                 # With no pin the empty file is just "nothing to verify". With --expect-head or --against it is a
                 # TRUNCATION to zero bytes and must reach the checks that exist to catch exactly that.
-                if [ "$#" -eq 0 ]; then echo "Ledger at $LEDGER is empty: nothing to verify."; exit 0; fi
+                if [ "$#" -eq 0 ]; then echo "Ledger at $LEDGER is empty: nothing to verify. (Unpinned: an emptied ledger looks the same. Use --expect-head or --against to catch a truncation.)"; exit 0; fi
                 cmd_verify "$@"
               fi
               require_ledger; cmd_verify "$@";;
