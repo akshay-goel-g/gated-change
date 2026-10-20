@@ -140,11 +140,12 @@ $(sed 's/^/          /' "$f" 2>/dev/null)"
 # `sed -i EXPR FILE` means different things to GNU sed (no suffix argument) and BSD sed on macOS (the next argument is a
 # suffix, so the expression is read as one and fails with "invalid command code"). `-i.bak` plus deleting the backup works
 # on both. The expression must itself be portable: no \r, no `2a text` on one line (use sedi_crlf / sedi_after below).
-sedi() { local last; for last; do :; done; sed -i.sedibak "$@" && rm -f "$last.sedibak"; }
+sedi() { local last rc; for last; do :; done; sed -i.sedibak "$@"; rc=$?; rm -f "$last.sedibak"; return $rc; }
 # Every line ends CRLF (what a Windows checkout does). BSD sed does not understand \r in a replacement.
-sedi_crlf() { awk '{ printf "%s\r\n", $0 }' "$1" > "$1.sedibak" && cat "$1.sedibak" > "$1" && rm -f "$1.sedibak"; }
-# Insert TEXT as a new line after line N. BSD sed's `Na text` form needs a newline; awk does not.
-sedi_after() { awk -v n="$1" -v t="$2" '{ print } NR == n { print t }' "$3" > "$3.sedibak" && cat "$3.sedibak" > "$3" && rm -f "$3.sedibak"; }
+sedi_crlf() { local rc=0; awk '{ printf "%s\r\n", $0 }' "$1" > "$1.sedibak" && cat "$1.sedibak" > "$1" || rc=$?; rm -f "$1.sedibak"; return $rc; }
+# Insert TEXT as a new line after line N. BSD sed's `Na text` form needs a newline; awk does not. TEXT goes through the
+# environment so awk does not process backslash escapes in it (awk -v does).
+sedi_after() { local rc=0; SEDI_TEXT="$2" awk -v n="$1" '{ print } NR == n { print ENVIRON["SEDI_TEXT"] }' "$3" > "$3.sedibak" && cat "$3.sedibak" > "$3" || rc=$?; rm -f "$3.sedibak"; return $rc; }
 
 # ---------------------------------------------------------------- json
 PY=""
@@ -6885,8 +6886,7 @@ test_dashboard_check_passes_on_a_consistent_kit() {
 test_dashboard_check_catches_a_diverged_loop_diagram() {
   newrepo
   # Remove one step from README's loop, leaving 00-start.md's intact.
-  sedi '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md" 2>/dev/null \
-    || sed -i '' '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md"
+  sedi '/├─ Package + Deploy/d' "$REPO/.pipeline/README.md"
   run bash -c "cd '$REPO' && bash .pipeline/tools/dashboard.sh --check"
   assert_exit 1
   assert_contains "different steps"
@@ -6901,8 +6901,7 @@ test_dashboard_check_catches_a_diverged_loop_diagram() {
 test_dashboard_check_catches_a_drifted_budget_index() {
   newrepo
   # Bump G5's budget in the 02-gates.md prose index only; the router keeps 30m.
-  sedi 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md" 2>/dev/null \
-    || sed -i '' 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md"
+  sedi 's/\(\*\*G5 · Proof\*\*.*\)| 30m |/\1| 25m |/' "$REPO/.pipeline/core/02-gates.md"
   run bash -c "cd '$REPO' && bash .pipeline/tools/dashboard.sh --check"
   assert_exit 1 "a budget stated two ways must fail the check"
   assert_contains "G5 budget"
