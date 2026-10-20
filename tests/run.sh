@@ -2610,7 +2610,8 @@ test_emit_with_no_summary_still_reports_success_after_a_real_write() {
   run bash -c "LEDGER='$(ledger_path)'; . '$fns'; emit '{\"type\":\"gate\"}'"
   rm -f "$fns"
   assert_exit 0 "a real write with no summary argument must not be reported as a failure"
-  assert_file_contains "$(ledger_path)" '{"type":"gate"}'
+  # the record lands, with its chain link appended as the last key
+  assert_file_contains "$(ledger_path)" '{"type":"gate","prev":"'
 }
 
 # G7 Threat round 3: the non-regular-file guard above now catches the
@@ -8349,6 +8350,327 @@ test_c1_a_real_file_outside_the_repository_is_not_citable() {
   assert_exit 2
   assert_contains ".."
   rm -f "$REPO/../c1-sibling.txt"
+}
+
+# ================================================================ C3: the ledger hash chain
+c3_route() { led route --change c3 --predicted T2 --actual T2 --reason "chain test $1" >/dev/null 2>&1; }
+c3_head() { run led verify; printf '%s\n' "$LAST_OUT" | sed -n 's/^chain head: \([0-9a-f]*\) .*/\1/p'; }
+
+test_c3_every_record_links_to_the_hash_of_the_line_before() {
+  newrepo
+  c3_route 1; c3_route 2
+  local l1 l2 want
+  l1="$(sed -n 1p "$(ledger_path)")"; l2="$(sed -n 2p "$(ledger_path)")"
+  assert_file_contains "$(ledger_path)" '"prev":"0000000000000000000000000000000000000000000000000000000000000000"'
+  want="$(printf '%s\n' "$l1" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  case "$l2" in *"\"prev\":\"$want\"}") _ok;; *) _fail "line 2 does not carry the sha256 of line 1: $l2";; esac
+  assert_jsonl_valid "$(ledger_path)"
+}
+
+test_c3_verify_passes_an_untouched_chain_and_prints_the_head() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  run led verify
+  assert_exit 0
+  assert_contains "3 chained (3 linked, 0 join(s), 0 break(s))"
+  assert_contains "chain head: "
+  assert_contains "verify: OK"
+}
+
+test_c3_verify_catches_an_edit_a_deletion_and_an_insertion() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4
+  local f; f="$(ledger_path)"; cp "$f" "$f.good"
+  sed -i '2s/chain test 2/EDITED/' "$f"
+  run led verify; assert_exit 1 "an edited line"; assert_contains "BREAK  record 3"
+  cp "$f.good" "$f"; sed -i '2d' "$f"
+  run led verify; assert_exit 1 "a deleted line"; assert_contains "BREAK"
+  cp "$f.good" "$f"; sed -i '2a {"type":"note"}' "$f"
+  run led verify; assert_exit 1 "an inserted unchained line"; assert_contains "no \"prev\""
+}
+
+test_c3_a_legacy_prefix_is_fine_and_a_tail_truncation_needs_the_pinned_head() {
+  newrepo
+  printf '{"type":"note","n":1}\n{"type":"note","n":2}\n' > "$(ledger_path)"
+  run led verify; assert_exit 0 "legacy lines before any chained line are fine"; assert_contains "2 legacy"
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  sed -i '$d' "$(ledger_path)"
+  run led verify; assert_exit 0 "without a pinned head a truncated tail is invisible"
+  run led verify --expect-head "$head"; assert_exit 1; assert_contains "--expect-head"
+}
+
+test_c3_two_branches_concatenated_are_a_join_not_a_break() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"; cp "$f" "$f.fork"
+  c3_route 3; local a_tail; a_tail="$(tail -n 1 "$f")"
+  cp "$f.fork" "$f"; c3_route 4
+  printf '%s\n' "$a_tail" >> "$f"          # branch B's line appended after branch A's: its prev points at line 2
+  run led verify
+  assert_exit 1 "strict by default"
+  assert_contains "--allow-joins"
+  run led verify --allow-joins
+  assert_exit 0
+  assert_contains "JOIN"
+  assert_contains "1 join(s)"
+}
+
+test_c3_a_crlf_checkout_still_verifies() {
+  newrepo
+  c3_route 1; c3_route 2
+  sed -i 's/$/\r/' "$(ledger_path)"
+  run led verify
+  assert_exit 0 "line endings are not tampering"
+}
+
+test_c3_a_forged_or_edited_record_cannot_pass_as_a_join() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4; c3_route 5
+  local f h1; f="$(ledger_path)"; cp "$f" "$f.good"
+  h1="$(sed -n 1p "$f" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  # a forged record after record 2 that links to record 1's hash: no hashing needed by the forger
+  awk -v h="$h1" 'NR==2{print; print "{\"type\":\"forged\",\"prev\":\"" h "\"}"; next}1' "$f.good" > "$f"
+  run led verify; assert_exit 1 "a forged insert"; assert_contains "BREAK"
+  # an edit, with the downstream prevs rewritten to an old hash
+  cp "$f.good" "$f"; sed -i '3s/chain test 3/EVIL/' "$f"
+  sed -i -E "4s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/;5s/\"prev\":\"[0-9a-f]+\"/\"prev\":\"$h1\"/" "$f"
+  run led verify; assert_exit 1 "an edit with cheap prev rewrites"; assert_contains "BREAK"
+  # A byte-for-byte copy of an existing record has the same hash, so it is a BREAK wherever it sits.
+  cp "$f.good" "$f"; sed -n 2p "$f.good" >> "$f"
+  run led verify; assert_exit 1 "a copy appended at the tail"; assert_contains "exact copy of record 2"
+  cp "$f.good" "$f"; sed -n 2p "$f.good" > "$f.dup"
+  { sed -n 1,2p "$f.good"; cat "$f.dup"; sed -n '3,$p' "$f.good"; } > "$f"
+  run led verify; assert_exit 1 "a copy inserted right after the original"; assert_contains "exact copy"
+  # DOCUMENTED LIMIT: a FORGED (not copied) record appended at the tail is a normal append to the chain.
+  cp "$f.good" "$f"; c3_route 6
+  run led verify; assert_exit 0
+}
+
+test_c3_a_two_line_branch_concatenated_is_still_a_join() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"; cp "$f" "$f.fork"
+  c3_route 3; c3_route 4; cp "$f" "$f.a"
+  cp "$f.fork" "$f"; c3_route 5; c3_route 6
+  tail -n 2 "$f" > "$f.b"; cat "$f.a" "$f.b" > "$f"
+  run led verify; assert_exit 1 "strict by default: a join is also the shape of an inserted record"; assert_contains "--allow-joins"
+  run led verify --allow-joins; assert_exit 0; assert_contains "1 join(s)"
+}
+
+test_c3_stripping_every_prev_is_caught_only_against_git() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  local f; f="$(ledger_path)"
+  sed -i -E 's/,"prev":"[0-9a-f]+"\}$/}/' "$f"
+  run led verify; assert_exit 0 "plain verify reads a stripped ledger as all-legacy"; assert_contains "3 legacy"
+  run led verify --against HEAD; assert_exit 1 "committed history is the anchor"; assert_contains "NOT a prefix"
+  git -C "$REPO" checkout -q -- "$f"
+  run led verify --against HEAD; assert_exit 0; assert_contains "exact prefix"
+  assert_not_contains "unpinned and unanchored"
+  c3_route 4
+  run led verify --against HEAD; assert_exit 0 "new records after the commit are fine"
+  sed -i '$d' "$f"; sed -i '$d' "$f"
+  run led verify --against HEAD; assert_exit 1 "a truncation into committed records"
+  run led verify --against no-such-rev; assert_exit 2
+}
+
+test_c3_blank_lines_are_ignored_and_never_chained_onto() {
+  newrepo
+  c3_route 1; c3_route 2
+  printf '\n\n' >> "$(ledger_path)"
+  run led verify; assert_exit 0 "a trailing blank line is not a break"; assert_contains "2 chained"
+  c3_route 3
+  run led verify; assert_exit 0 "a record after a blank line links to the last real record"; assert_contains "3 chained (3 linked"
+}
+
+test_c3_a_ledger_path_with_spaces_and_a_prevlike_note_verify() {
+  newrepo
+  local d="$REPO/dir with space"; mkdir -p "$d"
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$d/l.jsonl" route --change c3 --predicted T2 --actual T2 --reason 'x,"prev":"abc"}' ) >/dev/null 2>&1
+  ( cd "$REPO" && bash .pipeline/tools/ledger.sh --ledger "$d/l.jsonl" route --change c3 --predicted T2 --actual T2 --reason y ) >/dev/null 2>&1
+  run bash -c "cd '$REPO' && bash .pipeline/tools/ledger.sh --ledger '$d/l.jsonl' verify"
+  assert_exit 0
+  assert_contains "2 chained (2 linked"
+}
+
+test_c3_a_reordered_pair_of_records_is_a_break() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3; c3_route 4
+  local f; f="$(ledger_path)"
+  { sed -n 1p "$f"; sed -n 3p "$f"; sed -n 2p "$f"; sed -n 4p "$f"; } > "$f.swap"; cp "$f.swap" "$f"
+  run led verify; assert_exit 1; assert_contains "BREAK"
+}
+
+test_c3_a_matching_pinned_head_passes_and_a_stale_one_fails() {
+  newrepo
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  [ -n "$head" ] || _fail "no chain head was printed"
+  run led verify --expect-head "$head"; assert_exit 0 "the right pin passes"; assert_contains "verify: OK"
+  c3_route 3
+  run led verify --expect-head "$head"; assert_exit 1 "after a legitimate append the old pin is stale"
+  assert_contains "--expect-head"
+}
+
+test_c3_a_record_written_after_a_crlf_conversion_still_chains() {
+  newrepo
+  c3_route 1; c3_route 2
+  sed -i 's/$/\r/' "$(ledger_path)"
+  c3_route 3
+  run led verify
+  assert_exit 0 "the writer must hash the CRLF last line the way verify does"
+  assert_contains "3 chained (3 linked"
+}
+
+test_c3_an_empty_pin_a_dash_revision_and_a_plain_ok_notice() {
+  newrepo
+  c3_route 1; c3_route 2
+  run led verify --expect-head ""; assert_exit 2 "an unset CI variable must not pin nothing"; assert_contains "REFUSED"
+  run led verify --expect-head "NOTHEX"; assert_exit 2
+  run led verify --against "--output=PWNED"; assert_exit 2
+  run led verify --against ""; assert_exit 2
+  [ ! -e "$REPO/PWNED" ] && _ok || _fail "an option reached git"
+  run led verify; assert_exit 0; assert_contains "unpinned and unanchored"
+  local head; head="$(c3_head)"
+  run led verify --expect-head "$head"; assert_exit 0; assert_not_contains "unpinned and unanchored"
+}
+
+test_c3_a_ledger_of_only_blank_lines_has_no_records() {
+  newrepo
+  printf '\n  \n\t\n' > "$(ledger_path)"
+  run led verify
+  assert_exit 0
+  assert_contains "0 record(s)"
+  assert_not_contains "1 chained"
+}
+
+test_c3_a_git_conflict_marker_is_named_as_one() {
+  newrepo
+  c3_route 1; c3_route 2
+  local f; f="$(ledger_path)"
+  { sed -n 1p "$f"; echo '<<<<<<< HEAD'; sed -n 2p "$f"; echo '======='; echo '>>>>>>> other'; } > "$f.m"; cp "$f.m" "$f"
+  run led verify; assert_exit 1; assert_contains "git conflict marker"
+}
+
+test_c3_two_branches_that_both_started_from_an_empty_ledger_are_a_genesis_join() {
+  newrepo
+  local f; f="$(ledger_path)"
+  : > "$f"; c3_route 1; c3_route 2; cp "$f" "$f.a"
+  : > "$f"; c3_route 3; c3_route 4; cp "$f" "$f.b"
+  cat "$f.a" "$f.b" > "$f"
+  run led verify --allow-joins
+  assert_exit 0 "both lines of descent start at the zero hash"
+  assert_contains "JOIN"
+}
+
+test_c3_a_whitespace_only_line_is_blank_for_the_writer_and_the_verifier() {
+  newrepo
+  c3_route 1
+  printf '   \t \n' >> "$(ledger_path)"
+  run led verify; assert_exit 0 "a whitespace-only line is not a record"; assert_contains "1 chained"
+  c3_route 2
+  run led verify; assert_exit 0 "and the writer chains onto the last real record"; assert_contains "2 chained (2 linked"
+}
+
+test_c3_parallel_writers_chain_correctly() {
+  newrepo
+  c3_route 0
+  local i
+  for i in 1 2 3 4 5; do ( c3_route "p$i" ) & done
+  wait
+  run led verify
+  assert_exit 0 "six writers, one ledger: the lock keeps the chain intact"
+  assert_contains "6 chained (6 linked, 0 join(s), 0 break(s))"
+  [ ! -d "$(ledger_path).lock" ] && _ok || _fail "the lock directory was left behind"
+}
+
+test_c3_a_stale_lock_from_a_crashed_writer_is_broken() {
+  newrepo
+  c3_route 1
+  mkdir "$(ledger_path).lock"
+  touch -d '10 minutes ago' "$(ledger_path).lock" 2>/dev/null || touch -t 200001010000 "$(ledger_path).lock"
+  c3_route 2
+  run led verify
+  assert_exit 0
+  assert_contains "2 chained (2 linked"
+}
+
+test_c3_three_branches_forked_from_one_record_concatenate_cleanly() {
+  newrepo
+  local f; f="$(ledger_path)"
+  c3_route 0; cp "$f" "$f.base"
+  c3_route x1; c3_route x2; tail -n 2 "$f" > "$f.x"
+  cp "$f.base" "$f"; c3_route y1; c3_route y2; tail -n 2 "$f" > "$f.y"
+  cp "$f.base" "$f"; c3_route z1; c3_route z2; tail -n 2 "$f" > "$f.z"
+  cat "$f.base" "$f.x" "$f.y" "$f.z" > "$f"
+  run led verify --allow-joins
+  assert_exit 0 "a three-way merge is an ordinary event"
+  assert_contains "2 join(s)"
+}
+
+test_c3_a_record_inserted_with_a_correct_link_is_a_break_unless_joins_are_allowed() {
+  newrepo
+  c3_route 1; c3_route 2; c3_route 3
+  local f h2; f="$(ledger_path)"; cp "$f" "$f.good"
+  h2="$(sed -n 2p "$f" | { sha256sum 2>/dev/null || shasum -a 256; } | awk '{print $1}')"
+  { sed -n 1,2p "$f.good"; printf '{"type":"forged","prev":"%s"}\n' "$h2"; sed -n 3p "$f.good"; } > "$f"
+  run led verify; assert_exit 1 "a forged record with a correct link, no hashing needed"; assert_contains "--allow-joins"
+  run led verify --allow-joins; assert_exit 0 "DOCUMENTED LIMIT: with joins allowed it reads as a one-record branch"
+}
+
+test_c3_a_numeric_looking_prev_is_not_equal_to_the_zero_hash() {
+  newrepo
+  printf '{"type":"x","prev":"0"}\n' > "$(ledger_path)"
+  run led verify; assert_exit 1 "prev 0 is not 64 zeros"
+}
+
+test_c3_an_empty_ledger_has_nothing_to_verify() {
+  newrepo
+  : > "$(ledger_path)"
+  run led verify; assert_exit 0; assert_contains "nothing to verify"
+  rm -f "$(ledger_path)"
+  run led verify; assert_exit 1 "a missing ledger is still an error"
+}
+
+test_c3_a_stale_lock_that_cannot_be_removed_ends_in_a_refusal_not_a_hang() {
+  newrepo
+  c3_route 1
+  local lock; lock="$(ledger_path).lock"
+  : > "$lock"                                   # a regular file: rmdir cannot remove it
+  touch -d '10 minutes ago' "$lock" 2>/dev/null || touch -t 200001010000 "$lock"
+  run env LEDGER_LOCK_WAIT=3 bash -c "cd '$REPO' && LED_NO_EVIDENCE=1 bash .pipeline/tools/ledger.sh --ledger '$(ledger_path)' route --change c3 --predicted T2 --actual T2 --reason blocked"
+  assert_exit 3
+  assert_contains "rmdir"
+  assert_contains "Nothing was written"
+  rm -f "$lock"
+}
+
+test_c3_truncating_to_zero_bytes_cannot_slip_past_a_pin_or_an_anchor() {
+  newrepo
+  c3_route 1; c3_route 2
+  local head; head="$(c3_head)"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  : > "$(ledger_path)"
+  run led verify; assert_exit 0 "no pin: an empty ledger is just nothing to verify"; assert_contains "nothing to verify"
+  run led verify --expect-head "$head"; assert_exit 1 "the pinned head catches a truncation to zero bytes"; assert_contains "BREAK"
+  run led verify --against HEAD; assert_exit 1 "so does the git anchor"; assert_contains "NOT a prefix"
+}
+
+test_c3_the_ok_lines_say_what_they_do_not_prove() {
+  newrepo
+  c3_route 1
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  run led verify; assert_exit 0; assert_contains "recomputing every later prev"
+  run led verify --against HEAD; assert_exit 0; assert_contains "not anchored by this check"
+}
+
+test_c3_verify_refuses_unknown_options() {
+  newrepo
+  c3_route 1
+  run led verify --bogus
+  assert_exit 2
 }
 
 test_c1_commands_conf_is_a_t4_surface_in_the_kit_and_the_template() {
