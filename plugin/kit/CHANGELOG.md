@@ -31,6 +31,13 @@ redesigns, recorded in `ledger.jsonl`.
 
 ### Added
 
+- **Gate subagents and a model map (ACTION-PLAN D1, D2).** `templates/agents/pipeline-gate-g1..g8.md`
+  (also in `.claude/agents/` for the kit itself): one Claude Code subagent per gate with `omitClaudeMd`,
+  a tool list per gate, the model of its tier, and the card's own `withhold:` line. `project/models.conf`
+  maps the card tiers to model IDs; `core/schemas/findings.schema.json` describes the findings a gate
+  returns, in the vocabulary `ledger.sh add --finding` already enforces. Tests keep the agents, cards,
+  `models.conf` and schema in step. Not yet run as live gates.
+
 - **Ledger tamper-evidence (ACTION-PLAN C3).** Every new record ends with `"prev"`, the sha256 of the line before it, and
   `ledger.sh verify` walks the chain: an edited, deleted or inserted line is a BREAK (exit 1), two branches concatenated
   after a merge are a BREAK unless you say `--allow-joins` (a record inserted with a correct link looks the same), older lines are the unchained prefix. A rewritten or truncated tail is only visible

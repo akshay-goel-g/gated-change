@@ -43,6 +43,10 @@ an ugly button you will notice. A weak model on Threat produces a clean report a
 warrants it on every reasoning gate. Cost scales with what is at risk — the same principle as
 the router.
 
+**What each tier is called today** lives in `project/models.conf` (strongest, mid, fast, interactive), so a
+model retirement is a one-line change there, not an edit to eight cards. The Claude Code gate agents in
+`templates/agents/` take their `model:` from it.
+
 **Record what you picked.** `ledger.sh add --model <name>` (or export `PIPELINE_MODEL`), and
 it warns when you do not. Not bookkeeping for its own sake: on the first real end-to-end run
 *every* gate including Dogfood was given the strongest model, against this table, and the
