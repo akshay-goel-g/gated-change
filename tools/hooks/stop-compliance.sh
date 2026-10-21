@@ -33,7 +33,7 @@ case "$MAX_ATTEMPTS" in ''|*[!0-9]*) MAX_ATTEMPTS=3;; esac
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(cd "$_HERE/../.." && pwd)"
-LEDGER="${LEDGER:-$KIT/ledger.jsonl}"
+LEDGER="${LEDGER:-${PIPELINE_DATA:-$KIT}/ledger.jsonl}"
 
 INPUT="$(cat)"
 

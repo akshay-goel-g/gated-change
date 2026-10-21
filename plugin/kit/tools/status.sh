@@ -40,9 +40,12 @@ set -uo pipefail
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
-CONF="${SURFACES:-$KIT/project/surfaces.conf}"
-LEDGER="${LEDGER:-$KIT/ledger.jsonl}"
-DASHBOARD="$KIT/dashboard.html"
+# DATA = where this project's own files live (project/, ledger.jsonl, dashboard.html, security-reports/). The kit's
+# directory unless PIPELINE_DATA says otherwise (D5): a plugin's code directory is shared and read-only.
+DATA="${PIPELINE_DATA:-$KIT}"
+CONF="${SURFACES:-$DATA/project/surfaces.conf}"
+LEDGER="${LEDGER:-$DATA/ledger.jsonl}"
+DASHBOARD="$DATA/dashboard.html"
 
 QUIET=0
 [ "${1:-}" = "--quiet" ] && QUIET=1
@@ -357,7 +360,7 @@ fi
 # header, the `|---|` separator, and the empty `| | | |` placeholder. Prose
 # outside a table is not an entry either — the template's own instructions are
 # full of the phrase.
-_reg="$KIT/project/registry.md"
+_reg="$DATA/project/registry.md"
 _reg_entries=0
 if [ -f "$_reg" ]; then
   _reg_entries="$(awk '
@@ -432,10 +435,10 @@ _stale_file() { # <file> <label>: tracked files only (an untracked file has no h
   return 0
 }
 if [ "$_stale_n" -gt 0 ]; then
-  [ "$_reg_entries" -gt 0 ] && _stale_file "$KIT/project/registry.md" "project/registry.md"
-  _stale_file "$KIT/project/map.md" "project/map.md"
+  [ "$_reg_entries" -gt 0 ] && _stale_file "$DATA/project/registry.md" "project/registry.md"
+  _stale_file "$DATA/project/map.md" "project/map.md"
   # The mined draft carries the commit it was mined at ("... at commit <sha> ..."), and is rarely committed.
-  _draft="$KIT/project/registry-draft.md"
+  _draft="$DATA/project/registry-draft.md"
   if [ -f "$_draft" ]; then
     _dsha="$(sed -n 's/^> Generated .* at commit \([0-9a-f]\{7,40\}\) from .*/\1/p' "$_draft" | head -n 1)"
     _dn="$(_commits_since "$_dsha")"
@@ -465,7 +468,7 @@ GOVERN_STALE=""
 _gstale() { GOVERN_STALE="${GOVERN_STALE}    $1
 "; }
 
-_risks="$KIT/project/risks.md"
+_risks="$DATA/project/risks.md"
 if [ -f "$_risks" ]; then
   # String-compared against today's date, not `date -d` — GNU-only, and would
   # break the declared BSD/macOS TARGET the same way it would everywhere else
@@ -489,7 +492,7 @@ EOF
   fi
 fi
 
-_govern="$KIT/project/govern.md"
+_govern="$DATA/project/govern.md"
 if [ -f "$_govern" ]; then
   # Same header/separator detection as the registry.md count above: a row is
   # a header only if the NEXT line is a "|---|" separator rule.

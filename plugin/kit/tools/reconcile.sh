@@ -78,7 +78,7 @@ set -uo pipefail
 # only way this repo dogfooded it. Mirrors dashboard.sh's KIT resolution.
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
-CONF="${CONF:-$KIT/project/surfaces.conf}"
+CONF="${CONF:-${PIPELINE_DATA:-$KIT}/project/surfaces.conf}"
 
 # Which gates a tier requires is the router's fact, not this script's.
 . "$_HERE/lib/matrix.sh"

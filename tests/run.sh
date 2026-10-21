@@ -3023,6 +3023,57 @@ test_ledger_default_path_is_self_hosting_aware() {
   [ -f "$SELFREPO/.pipeline/ledger.jsonl" ] && _fail "also wrote a stray .pipeline/ledger.jsonl — the old default leaking through" || _ok
 }
 
+# D5: the default no longer depends on the caller's cwd. Run from a subdirectory it used to write
+# <subdir>/.pipeline/ledger.jsonl while status.sh and the Stop hook read <project>/.pipeline/ledger.jsonl.
+test_ledger_default_path_does_not_depend_on_the_callers_cwd() {
+  newrepo
+  mkdir -p "$REPO/src/deep"
+  ( cd "$REPO/src/deep" && bash ../../.pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T4 --outcome pass --model m --evidence .pipeline/tools/ledger.sh:1 ) >/dev/null 2>&1
+  [ -f "$(ledger_path)" ] && _ok || _fail "an add from a subdirectory must reach <project>/.pipeline/ledger.jsonl"
+  [ -e "$REPO/src/deep/.pipeline" ] && _fail "a stray .pipeline appeared under the caller's cwd" || _ok
+}
+
+# D5: PIPELINE_DATA moves project/, the ledger and the dashboard away from the kit's code directory.
+_data_repo() { # a project whose kit CODE lives in .pipeline/ but whose DATA lives in $REPO/pdata
+  newrepo
+  mkdir -p "$REPO/pdata"
+  cp -r "$REPO/.pipeline/project" "$REPO/pdata/project"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "data dir" >/dev/null 2>&1
+}
+
+test_pipeline_data_redirects_ledger_and_status() {
+  _data_repo
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/ledger.sh add --confidence fresh --change c --gate G4 --tier T2 --outcome pass --model m --evidence .pipeline/tools/ledger.sh:1 ) >/dev/null 2>&1
+  [ -f "$REPO/pdata/ledger.jsonl" ] && _ok || _fail "PIPELINE_DATA did not receive the ledger"
+  [ -f "$(ledger_path)" ] && _fail "the kit directory also got a ledger" || _ok
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "No surfaces file"
+}
+
+test_pipeline_data_is_where_project_files_are_read_from() {
+  _data_repo
+  rm -rf "$REPO/.pipeline/project"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "drop kit-side project" >/dev/null 2>&1
+  LAST_OUT="$(cd "$REPO" && bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "No surfaces file"
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "No surfaces file"
+  # the miner writes its draft into the data directory too
+  local i
+  for i in 1 2; do
+    printf 'v%s\n' "$i" > "$REPO/src/a.js"; printf 'v%s\n' "$i" > "$REPO/src/b.js"
+    git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "fix: a and b together ($i)" >/dev/null 2>&1
+  done
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/mine-registry.sh ) >/dev/null 2>&1
+  [ -f "$REPO/pdata/project/registry-draft.md" ] && _ok || _fail "mine-registry.sh ignored PIPELINE_DATA"
+}
+
+test_pipeline_data_unset_changes_nothing_for_the_installed_layout() {
+  newrepo
+  LAST_OUT="$(cd "$REPO" && bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "No surfaces file"
+}
+
 # G7 Threat (ledger-success-shows-destination review): every prior test of the
 # success-message-names-$LEDGER behavior used led(), which always passes
 # --ledger explicitly — proving only that the tool echoes a path just handed to

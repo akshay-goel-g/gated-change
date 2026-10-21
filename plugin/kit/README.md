@@ -299,6 +299,10 @@ Each agent's `model:` is copied from the tier in `models.conf`; if you change an
 the agent files too (a test keeps the kit's own copies in step). Auto-memory is not switched off by
 the agent file: set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for the session that spawns the gates.
 
+Keeping your files apart from the kit's code (for a runner whose code directory is shared or read-only):
+set `PIPELINE_DATA=<dir>` and the tools read and write `project/`, `ledger.jsonl`, `dashboard.html` and
+`security-reports/` there instead of beside the code. Unset, they use the kit's own directory, as before.
+
 This is the one step that needs you to think. The shipped file describes a browser
 extension — **delete its rows and write your own**, or start from one of the
 [ready-made examples](examples/surfaces/) for a web app, REST API, Chrome extension,

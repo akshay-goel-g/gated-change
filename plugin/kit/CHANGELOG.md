@@ -31,6 +31,13 @@ redesigns, recorded in `ledger.jsonl`.
 
 ### Added
 
+- **`PIPELINE_DATA`: data apart from code (ACTION-PLAN D5).** One environment variable names the directory that holds
+  `project/`, `ledger.jsonl`, `dashboard.html` and `security-reports/`, separately from the kit's code. Unset, it is the
+  kit's own directory and nothing changes. `ledger.sh`, `status.sh`, `reconcile.sh`, `dashboard.sh`, `mine-registry.sh`,
+  both installers, the R0c and Stop hooks and the pre-push template all read it. This is what lets a plugin keep its
+  (shared, read-only) code apart from each project's files. Kit-location and git-history logic in `status.sh` is
+  unchanged and still assumes the kit is inside the project repository.
+
 - **Gate subagents and a model map (ACTION-PLAN D1, D2).** `templates/agents/pipeline-gate-g1..g8.md`
   (also in `.claude/agents/` for the kit itself): one Claude Code subagent per gate with `omitClaudeMd`,
   a tool list per gate, the model of its tier, and the card's own `withhold:` line. `project/models.conf`
@@ -76,6 +83,12 @@ redesigns, recorded in `ledger.jsonl`.
   `LICENSE` is the verbatim 1.0.0 text; `NOTICE` carries the `Required Notice:` line.
 
 ### Fixed
+
+- **`ledger.sh` default no longer depends on the current directory (D5).** `ledger.sh add` run from a subdirectory of an
+  installed project wrote `<subdir>/.pipeline/ledger.jsonl`, while `status.sh` and the Stop hook read
+  `<project>/.pipeline/ledger.jsonl`. The default is now `$PIPELINE_DATA/ledger.jsonl`, one absolute path (the kit's
+  directory when unset). A kit vendored somewhere other than `.pipeline/` now writes inside itself, as its `status.sh`
+  always read.
 
 - **Small quality fixes (ACTION-PLAN B1-B6).**
   - *B1* The 25 macOS CI failures were test-harness portability in `tests/run.sh` (GNU `sed -i EXPR FILE`, padded `wc -w`), not product bugs; the tests now use portable helpers. Confirm on a real macOS run.

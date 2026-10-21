@@ -153,12 +153,16 @@ KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
 # `git rev-parse --show-toplevel` and `pwd` disagree about drive-letter form on
 # Windows (`D:/...` vs `/d/...`), and an earlier version of this exact fix did
 # precisely that comparison and silently always resolved to "installed".
-if [ -z "$(git -C "$KIT_ROOT" rev-parse --show-prefix 2>/dev/null)" ] \
-   && git -C "$KIT_ROOT" rev-parse --show-toplevel >/dev/null 2>&1; then
-  LEDGER="${LEDGER:-$KIT_ROOT/ledger.jsonl}"
-else
-  LEDGER="${LEDGER:-.pipeline/ledger.jsonl}"
-fi
+#
+# D5: the default is now ONE absolute path in both cases, $PIPELINE_DATA/ledger.jsonl, where PIPELINE_DATA defaults to
+# the kit's own directory. For this repo and for an install at <project>/.pipeline that is the same file as before; what
+# changes is that it no longer depends on the caller's cwd (status.sh, the Stop hook and the dashboard already resolved
+# it against the kit, so `ledger.sh add` from a subdirectory wrote a ledger the others never read). A vendored copy
+# somewhere other than .pipeline/ now writes inside itself, as its status.sh always read it.
+# PIPELINE_DATA is the one switch that separates DATA (project/, ledger.jsonl, security-reports/) from kit CODE, for a
+# runner (the plugin) whose code directory is read-only and shared between projects. LEDGER still overrides.
+DATA_ROOT="${PIPELINE_DATA:-$KIT_ROOT}"
+LEDGER="${LEDGER:-$DATA_ROOT/ledger.jsonl}"
 
 # An option that takes a value must GET one: `add --change --log ...` used to store "--log" as the
 # change name (append-only, so permanently) and `route --change --restart-lineage` swallowed a real
@@ -622,7 +626,7 @@ citation_ok() {
   case "$f" in /*|[A-Za-z]:*) CITE_WHY="absolute paths are not accepted; cite a path inside the repository"; return 1;;
                ..|../*|*/..|*/../*) CITE_WHY="a path with .. is not accepted"; return 1;; esac
   # Resolved against the repository the KIT lives in, the same one evidence_run uses, not the caller's cwd.
-  root="$(git -C "$KIT_ROOT" rev-parse --show-toplevel 2>/dev/null)" || { CITE_WHY="the kit is not inside a git repository"; return 1; }
+  root="$(git -C "$DATA_ROOT" rev-parse --show-toplevel 2>/dev/null)" || { CITE_WHY="the kit is not inside a git repository"; return 1; }
   [ -f "$root/$f" ] || { CITE_WHY="no such file '$f' in the repository"; return 1; }
   local _lines; _lines="$(awk 'END{print NR}' "$root/$f")"
   [ "$n" -le "$_lines" ] || { CITE_WHY="'$f' has fewer than $n lines"; return 1; }
@@ -641,7 +645,7 @@ evidence_run() {
     EVIDENCE::?*) ;;
     *) echo "REFUSED: --evidence-cmd '$key' is not EVIDENCE::<name>. Nothing was written to $LEDGER." >&2; return 2;;
   esac
-  conf="$KIT_ROOT/project/commands.conf"
+  conf="$DATA_ROOT/project/commands.conf"
   [ -f "$conf" ] || { echo "REFUSED: $conf not found. Nothing was written to $LEDGER." >&2; return 2; }
   # Read ONCE: the bytes compared with HEAD below are the bytes the command is taken from.
   local _working _names
@@ -658,9 +662,9 @@ evidence_run() {
     MANUAL::*|MANUAL) echo "REFUSED: '$key' is a MANUAL line (${cmd#MANUAL::}). A human step is not evidence this tool can run;" >&2
                       echo "  cite it with --evidence file:line instead. Nothing was written to $LEDGER." >&2; return 2;;
   esac
-  # The command runs in the repository the KIT lives in, never in the caller's cwd.
-  root="$(git -C "$KIT_ROOT" rev-parse --show-toplevel 2>/dev/null)" || {
-    echo "REFUSED: $KIT_ROOT is not inside a git repository, so the line that would run cannot be checked against a commit." >&2
+  # The command runs in the repository the DATA lives in (the kit's own, unless PIPELINE_DATA), never in the caller's cwd.
+  root="$(git -C "$DATA_ROOT" rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "REFUSED: $DATA_ROOT is not inside a git repository, so the line that would run cannot be checked against a commit." >&2
     echo "  Nothing was written to $LEDGER." >&2; return 2; }
   # The line that runs must be the one that was reviewed: fail CLOSED unless commands.conf is committed in HEAD
   # and the working copy is the same bytes (compared with CR removed, so an autocrlf checkout is not a change).
