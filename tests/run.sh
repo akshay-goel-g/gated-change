@@ -8919,6 +8919,42 @@ test_escape_note_is_not_fooled_by_a_large_ledger_with_an_early_match() {
   done
 }
 
+# D1/D2: gate agents, tier->model map and findings schema stay in step with the cards and the ledger.
+test_models_conf_has_every_tier_once_and_a_model_for_each() {
+  local t n
+  for t in strongest mid fast interactive; do
+    n="$(grep -c "^$t::[^:]\+::" "$KIT/templates/project/models.conf")"
+    [ "$n" -eq 1 ] && _ok || _fail "models.conf tier '$t' has $n rows in the template (want 1)"
+  done
+  cmp -s "$KIT/templates/project/models.conf" "$KIT/project/models.conf" && _ok || _fail "project/models.conf differs from the template"
+}
+
+test_gate_agents_match_their_cards_and_models_conf() {
+  local card id lid tier want cardmodel agent
+  for card in "$KIT"/core/cards/G[1-8]-*.md; do
+    id="$(basename "$card" | cut -c1-2)"; lid="$(echo "$id" | tr A-Z a-z)"
+    agent="$KIT/templates/agents/pipeline-gate-$lid.md"
+    [ -f "$agent" ] && _ok || { _fail "no gate agent for $id"; continue; }
+    cmp -s "$agent" "$KIT/.claude/agents/pipeline-gate-$lid.md" && _ok || _fail "$id: .claude/agents copy differs from templates/agents"
+    cardmodel="$(sed -n 's/^model:[[:space:]]*\([a-z]*\).*/\1/p' "$card" | head -n 1)"
+    case "$cardmodel" in strongest) tier=strongest;; mid) tier=mid;; whatever) tier=interactive;; *) tier="?$cardmodel";; esac
+    want="$(sed -n "s/^$tier::\([^:]*\)::.*/\1/p" "$KIT/templates/project/models.conf")"
+    grep -qx "model: $want" "$agent" && _ok || _fail "$id: agent model is not '$want' (tier $tier in models.conf)"
+    grep -qx "omitClaudeMd: true" "$agent" && _ok || _fail "$id: agent does not set omitClaudeMd"
+    grep -qx "name: pipeline-gate-$lid" "$agent" && _ok || _fail "$id: agent name"
+    grep -qF "$(sed -n 's/^withhold:[[:space:]]*//p' "$card" | sed 's/[[:space:]]*$//')" "$agent" && _ok || _fail "$id: agent does not carry the card's withhold line"
+  done
+}
+
+test_findings_schema_matches_the_ledger_vocabulary() {
+  local f="$KIT/core/schemas/findings.schema.json"
+  grep -q '"enum": \["blocking", "minor", "info", "out-of-scope"\]' "$f" && _ok || _fail "schema severity enum differs from ledger.sh"
+  grep -q 'blocking|minor|info|out-of-scope) ;;' "$KIT/tools/ledger.sh" && _ok || _fail "ledger.sh severity case moved: update this test"
+  if [ -n "$PY" ]; then
+    "$PY" -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$f" 2>/dev/null && _ok || _fail "findings.schema.json is not valid JSON"
+  else _skip "no python — cannot validate JSON"; fi
+}
+
 test_c3_verify_refuses_unknown_options() {
   newrepo
   c3_route 1

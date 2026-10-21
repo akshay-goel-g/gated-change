@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/akshay-goel-g/gated-change/core/schemas/findings.schema.json",
+  "title": "Gate findings",
+  "description": "What a gate reviewer returns, one object per finding. Each maps to one `ledger.sh add --finding \"<severity>::<location>::<claim>\"` flag (core/04-ledger.md). An empty array is a pass with nothing to cite, which a fresh T3/T4 pass cannot be: it needs an `info` finding with a real location, or --evidence (core/02-gates.md).",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["severity", "location", "claim"],
+    "additionalProperties": false,
+    "properties": {
+      "severity": {
+        "enum": ["blocking", "minor", "info", "out-of-scope"],
+        "description": "The four values every report groups by; ledger.sh refuses any other."
+      },
+      "location": {
+        "type": "string",
+        "description": "file:line, or command output. May be empty only for info and out-of-scope; ledger.sh refuses a blocking or minor finding without one."
+      },
+      "claim": {
+        "type": "string",
+        "minLength": 1,
+        "description": "What is wrong, or what held. It may contain '::' (everything after the second separator is the claim). An out-of-scope claim must contain filed:<ref>."
+      }
+    },
+    "allOf": [
+      {
+        "if": { "properties": { "severity": { "enum": ["blocking", "minor"] } } },
+        "then": { "properties": { "location": { "minLength": 1 } } }
+      },
+      {
+        "if": { "properties": { "severity": { "const": "out-of-scope" } } },
+        "then": { "properties": { "claim": { "pattern": "filed:[^ ]" } } }
+      }
+    ]
+  }
+}

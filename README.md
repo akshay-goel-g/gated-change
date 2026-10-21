@@ -288,6 +288,17 @@ mkdir -p .pipeline/project && cp -r .pipeline/templates/project/. .pipeline/proj
 $EDITOR .pipeline/project/surfaces.conf
 ```
 
+Optional, Claude Code only: install the gate subagents so a gate review starts in a fresh context
+with no `CLAUDE.md` loaded (`omitClaudeMd`), a read-only tool list, and the model for its tier:
+
+```bash
+mkdir -p .claude/agents && cp .pipeline/templates/agents/*.md .claude/agents/
+```
+
+Each agent's `model:` is copied from the tier in `models.conf`; if you change an ID there, change it in
+the agent files too (a test keeps the kit's own copies in step). Auto-memory is not switched off by
+the agent file: set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for the session that spawns the gates.
+
 This is the one step that needs you to think. The shipped file describes a browser
 extension — **delete its rows and write your own**, or start from one of the
 [ready-made examples](examples/surfaces/) for a web app, REST API, Chrome extension,
@@ -929,6 +940,7 @@ Everything project-specific lives in `.pipeline/project/`. Start from `templates
 | `grounding.md` | This codebase's specific false-claim patterns | Grounding protocol |
 | `references.md` | Documents provided, what was extracted, and when | `core/13-references.md` |
 | `capabilities.conf` | Which asset-producing tools you have wired up | `core/09-capabilities.md` |
+| `models.conf` | Which model ID each gate tier (strongest, mid, fast, interactive) means today | `core/08-models.md`, the gate agents |
 | `ceilings.md` | Documented limits on things that accumulate | Scale ceilings |
 
 ### `surfaces.conf` — the file that does the work
