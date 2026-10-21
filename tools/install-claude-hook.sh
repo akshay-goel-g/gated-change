@@ -18,7 +18,7 @@ set -uo pipefail
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
-CONF="$KIT/project/surfaces.conf"
+CONF="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
 HOOK_SCRIPT="$KIT/tools/hooks/r0c-post-edit.sh"
 
 git rev-parse --show-toplevel >/dev/null 2>&1 || { echo "not a git repository" >&2; exit 2; }

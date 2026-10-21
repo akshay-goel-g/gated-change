@@ -34,7 +34,7 @@ set -uo pipefail
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(cd "$_HERE/../.." && pwd)"
-SURFACES="$KIT/project/surfaces.conf"
+SURFACES="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
 
 INPUT="$(cat)"
 

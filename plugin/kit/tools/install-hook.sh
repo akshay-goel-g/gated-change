@@ -17,7 +17,7 @@ set -uo pipefail
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
 SRC="$KIT/templates/pre-push"
-CONF="$KIT/project/surfaces.conf"
+CONF="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 

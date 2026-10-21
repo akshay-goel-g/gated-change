@@ -33,8 +33,9 @@ trap '' PIPE
 # wherever the kit actually is relative to the repo root — "." when the kit IS
 # the repo, which is how gated-change runs this hook on itself.
 PIPELINE_DIR="${PIPELINE_DIR:-.pipeline}"
-SURFACES="${SURFACES:-$PIPELINE_DIR/project/surfaces.conf}"
-REPORTS="${REPORTS:-$PIPELINE_DIR/security-reports}"
+# PIPELINE_DATA (D5) separates this project's files from the kit's code; unset, both are under PIPELINE_DIR as before.
+SURFACES="${SURFACES:-${PIPELINE_DATA:-$PIPELINE_DIR}/project/surfaces.conf}"
+REPORTS="${REPORTS:-${PIPELINE_DATA:-$PIPELINE_DIR}/security-reports}"
 
 # Derive the T4 rules from the surfaces file. Split on the LAST "::" the same
 # way reconcile.sh does, because a regex may contain ":" freely.
@@ -409,8 +410,8 @@ fi
 #     current between pushes; this hook keeps the baked-in fallback (and
 #     every file:// viewer) close to current across them.
 DASHBOARD_SH="$PIPELINE_DIR/tools/dashboard.sh"
-LEDGER_FILE="$PIPELINE_DIR/ledger.jsonl"
-DASHBOARD_OUT="$PIPELINE_DIR/dashboard.html"
+LEDGER_FILE="${PIPELINE_DATA:-$PIPELINE_DIR}/ledger.jsonl"
+DASHBOARD_OUT="${PIPELINE_DATA:-$PIPELINE_DIR}/dashboard.html"
 
 if [ -f "$DASHBOARD_SH" ] && [ -f "$LEDGER_FILE" ]; then
   # The committed version, generated-timestamp blanked, to compare against

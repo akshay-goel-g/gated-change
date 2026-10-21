@@ -78,7 +78,7 @@ DASH="$HERE/dashboard"
 # reasoning about it.
 PRINT_MODEL=0
 CHECK_ONLY=0
-OUT=".pipeline/dashboard.html"
+OUT="${PIPELINE_DATA:-.pipeline}/dashboard.html"
 SPLIT_DIR=""
 LEDGERS=()
 PROJECT_NAMES=()
@@ -101,7 +101,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
-[ "${#LEDGERS[@]}" -gt 0 ] || { LEDGERS=(".pipeline/ledger.jsonl"); PROJECT_NAMES=(""); }
+[ "${#LEDGERS[@]}" -gt 0 ] || { LEDGERS=("${PIPELINE_DATA:-.pipeline}/ledger.jsonl"); PROJECT_NAMES=(""); }
 
 [ -d "$CARDS" ]  || { echo "no cards directory at $CARDS" >&2; exit 2; }
 [ -f "$ROUTER" ] || { echo "no router at $ROUTER" >&2; exit 2; }
@@ -549,7 +549,7 @@ if [ -n "$_cov_repo_root" ] && [ "${#LEDGERS[@]}" -eq 1 ] && [ -f "$KIT/tools/li
     /*|[A-Za-z]:[/\\]*) _cov_led_abs="$_cov_led" ;;
                      *) _cov_led_abs="$(pwd)/$_cov_led" ;;
   esac
-  _cov_conf="$KIT/project/surfaces.conf"
+  _cov_conf="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
 
   # The ledger must belong to THIS repo. Comparing path STRINGS is wrong here,
   # and was: on Git Bash for Windows `git rev-parse --show-toplevel` yields
