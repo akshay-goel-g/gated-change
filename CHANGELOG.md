@@ -36,7 +36,13 @@ redesigns, recorded in `ledger.jsonl`.
   kit's own directory and nothing changes. `ledger.sh`, `status.sh`, `reconcile.sh`, `dashboard.sh`, `mine-registry.sh`,
   both installers, the R0c and Stop hooks and the pre-push template all read it. This is what lets a plugin keep its
   (shared, read-only) code apart from each project's files. Kit-location and git-history logic in `status.sh` is
-  unchanged and still assumes the kit is inside the project repository.
+  unchanged and still assumes the kit is inside the project repository. `PIPELINE_DATA` must be an absolute directory
+  inside the repository being worked on (`tools/lib/data-root.sh`; `PIPELINE_DATA_EXTERNAL=1` waives that): these files
+  are trust configuration, and a value left over from another project is refused instead of obeyed. The installers
+  bake the value into the pre-push hook and the Claude Code hook commands. The data directory is excluded from
+  reconcile and coverage tiering, as the kit's own files are. Found by the D1/D2/D5 gate round (change
+  `multi-surface-d1-d2-d5`), which also made G2, G3 and G8 agent tool lists explicit and fixed the dashboard's
+  cwd-relative defaults and the pre-push dashboard comparison under an absolute data path.
 
 - **Gate subagents and a model map (ACTION-PLAN D1, D2).** `templates/agents/pipeline-gate-g1..g8.md`
   (also in `.claude/agents/` for the kit itself): one Claude Code subagent per gate with `omitClaudeMd`,

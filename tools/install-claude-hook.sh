@@ -18,7 +18,13 @@ set -uo pipefail
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
+. "$KIT/tools/lib/data-root.sh"
+data_root_require install-claude-hook.sh
 CONF="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
+# Claude Code runs the hook commands with whatever environment it was started in, which need not hold PIPELINE_DATA.
+# When one is set now, the commands carry it, so the hooks read the surfaces file and ledger this installer validated.
+DATA_PREFIX=""
+[ -z "${PIPELINE_DATA:-}" ] || DATA_PREFIX="PIPELINE_DATA='$PIPELINE_DATA' "
 HOOK_SCRIPT="$KIT/tools/hooks/r0c-post-edit.sh"
 
 git rev-parse --show-toplevel >/dev/null 2>&1 || { echo "not a git repository" >&2; exit 2; }
@@ -61,7 +67,7 @@ fi
 KIT_PREFIX="$(git -C "$KIT" rev-parse --show-prefix 2>/dev/null)"
 KIT_PREFIX="${KIT_PREFIX%/}"
 HOOK_REL="${KIT_PREFIX:+$KIT_PREFIX/}tools/hooks/r0c-post-edit.sh"
-COMMAND="bash \"\$CLAUDE_PROJECT_DIR/$HOOK_REL\""
+COMMAND="${DATA_PREFIX}bash \"\$CLAUDE_PROJECT_DIR/$HOOK_REL\""
 
 # Merging into a JSON file this script does not own is exactly the kind of
 # thing this kit otherwise refuses to do with sed/awk (see tools/ledger.sh's
@@ -82,7 +88,7 @@ for c in python3 python; do command -v "$c" >/dev/null 2>&1 && { PY="$c"; break;
 COMMAND_JSON_ESCAPED="$(printf '%s' "$COMMAND" | sed 's/"/\\"/g')"
 SNIPPET_ONE_LINE="{ \"matcher\": \"Edit|Write|MultiEdit\", \"hooks\": [ { \"type\": \"command\", \"command\": \"$COMMAND_JSON_ESCAPED\" } ] }"
 STOP_REL_NP="${KIT_PREFIX:+$KIT_PREFIX/}tools/hooks/stop-compliance.sh"
-STOP_JSON_NP="$(printf '%s' "bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL_NP\"" | sed 's/"/\\"/g')"
+STOP_JSON_NP="$(printf '%s' "${DATA_PREFIX}bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL_NP\"" | sed 's/"/\\"/g')"
 STOP_SNIPPET_ONE_LINE="{ \"hooks\": [ { \"type\": \"command\", \"command\": \"$STOP_JSON_NP\", \"timeout\": 180 } ] }"
 
 if [ -z "$PY" ]; then
@@ -193,7 +199,7 @@ esac
 STOP_SCRIPT="$KIT/tools/hooks/stop-compliance.sh"
 if [ -f "$STOP_SCRIPT" ]; then
   STOP_REL="${KIT_PREFIX:+$KIT_PREFIX/}tools/hooks/stop-compliance.sh"
-  STOP_COMMAND="bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL\""
+  STOP_COMMAND="${DATA_PREFIX}bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL\""
   STOP_RESULT="$(merge_hook Stop "" "$STOP_COMMAND" 180)"
   case "$STOP_RESULT" in
     ALREADY_PRESENT) echo "Stop hook already installed in $SETTINGS." ;;

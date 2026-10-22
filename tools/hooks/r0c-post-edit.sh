@@ -35,6 +35,13 @@ set -uo pipefail
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(cd "$_HERE/../.." && pwd)"
 SURFACES="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
+if [ -n "${PIPELINE_DATA:-}" ]; then
+  . "$KIT/tools/lib/data-root.sh"
+  if ! data_root_check "$PIPELINE_DATA"; then
+    echo "R0c: PIPELINE_DATA is not usable ($DATA_ROOT_WHY), so this edit was NOT checked against any T3/T4 rule. Fix or unset the variable." >&2
+    exit 2
+  fi
+fi
 
 INPUT="$(cat)"
 

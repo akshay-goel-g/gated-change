@@ -69,16 +69,16 @@ DASH="$HERE/dashboard"
 
 # KIT locates the ASSETS (cards, router, app.js) — fixed relative to this
 # script, correct whether the kit lives at a repo root or inside an adopting
-# project's .pipeline/. Ledger and output are DATA and follow the opposite
-# rule: relative to wherever the command is RUN from, exactly like
-# tools/ledger.sh's own default (`.pipeline/ledger.jsonl`, not
-# `$KIT/.pipeline/ledger.jsonl`). Get this backwards and an installed kit
-# looks for its own ledger at .pipeline/.pipeline/ledger.jsonl — confirmed by
-# actually running it from a simulated installed project, not just by
-# reasoning about it.
+# project's .pipeline/. Ledger and output are DATA: $PIPELINE_DATA, which is the
+# kit's own directory unless set -- the same default tools/ledger.sh, status.sh and
+# the Stop hook use, and independent of the cwd. (They used to be `.pipeline/...`
+# relative to the cwd; run from a subdirectory, or with the kit vendored elsewhere,
+# that read a ledger nobody had written and wrote a stray .pipeline/dashboard.html.)
 PRINT_MODEL=0
 CHECK_ONLY=0
-OUT="${PIPELINE_DATA:-.pipeline}/dashboard.html"
+. "$HERE/lib/data-root.sh"
+data_root_require dashboard.sh
+OUT="${PIPELINE_DATA:-$KIT}/dashboard.html"
 SPLIT_DIR=""
 LEDGERS=()
 PROJECT_NAMES=()
@@ -101,7 +101,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option: $1" >&2; exit 2;;
   esac
 done
-[ "${#LEDGERS[@]}" -gt 0 ] || { LEDGERS=("${PIPELINE_DATA:-.pipeline}/ledger.jsonl"); PROJECT_NAMES=(""); }
+[ "${#LEDGERS[@]}" -gt 0 ] || { LEDGERS=("${PIPELINE_DATA:-$KIT}/ledger.jsonl"); PROJECT_NAMES=(""); }
 
 [ -d "$CARDS" ]  || { echo "no cards directory at $CARDS" >&2; exit 2; }
 [ -f "$ROUTER" ] || { echo "no router at $ROUTER" >&2; exit 2; }
@@ -600,7 +600,7 @@ if [ -n "$_cov_repo_root" ] && [ "${#LEDGERS[@]}" -eq 1 ] && [ -f "$KIT/tools/li
     # Same escaping idiom as WARN_JSON above: a commit subject is free text and
     # lands inside a JSON string here. escape_payload() then neutralises
     # "</script>" for the whole MODEL before it is inlined into the page.
-    _cov_raw="$(coverage_scan "$_cov_conf" "$_cov_range" "$_cov_scanned" "$(coverage_kit_prefix "$KIT")")"
+    _cov_raw="$(coverage_scan "$_cov_conf" "$_cov_range" "$_cov_scanned" "$(coverage_kit_prefix "$KIT")" "$(coverage_data_prefix)")"
     _cov_rows="$(printf '%s\n' "$_cov_raw" \
       | awk -F'\t' 'BEGIN{first=1;printf "["}
           $1+0 >= 3 {

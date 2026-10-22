@@ -1,6 +1,7 @@
 ---
 name: pipeline-gate-g8
 description: Runs gate G8 Dogfood of the gated-change pipeline in a fresh context. Use only when the router or reconcile.sh mandates G8; hand it the card path and the inputs the card lists, never your own explanation.
+disallowedTools: Edit, Write, NotebookEdit
 model: inherit
 omitClaudeMd: true
 ---

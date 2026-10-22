@@ -244,6 +244,14 @@ coverage_kit_prefix() {
   git -C "$1" rev-parse --show-prefix 2>/dev/null || true
 }
 
+# The data directory's path inside the repo ("pdata/") when PIPELINE_DATA points at one, else nothing. Its ledger,
+# dashboard and reports are produced by the pipeline itself, so they are not the project's work either; its project/
+# directory still is (coverage_scan keeps <prefix>project/ in, as it does for the kit).
+coverage_data_prefix() {
+  [ -n "${PIPELINE_DATA:-}" ] || return 0
+  git -C "$PIPELINE_DATA" rev-parse --show-prefix 2>/dev/null || true
+}
+
 # The raw commit value the ledger claims, verified or not — so a caller can
 # tell "no gate ever ran" from "a gate ran on a commit I cannot see."
 coverage_claimed_anchor() {
@@ -279,7 +287,7 @@ coverage_claimed_anchor() {
 # strips newlines (later lines of a message are `%b`, not emitted), so a
 # subject cannot introduce a line at all, let alone one beginning with \001.
 coverage_scan() {
-  _cov_conf="$1"; _cov_range="$2"; _cov_max="$3"; _cov_excl="${4:-}"
+  _cov_conf="$1"; _cov_range="$2"; _cov_max="$3"; _cov_excl="${4:-}"; _cov_excl2="${5:-}"
   [ -f "$_cov_conf" ] || return 0
   _cov_marker="$(printf '\001')"
   # $_cov_range is unquoted on purpose: `A..HEAD`, `HEAD`, or `HEAD ^a ^b` (coverage_range), built
@@ -291,7 +299,7 @@ coverage_scan() {
   # anchored rules never matched it (G7 round 26). A name still quoted after that (it holds a quote,
   # a backslash or a tab) loses its wrapping quotes in the awk below.
   git -c core.quotePath=false log --no-merges --no-renames -n "$_cov_max" --name-only --format="%x01%h %s" $_cov_range -- 2>/dev/null \
-    | awk -v M="$_cov_marker" -v X="$_cov_excl" '
+    | awk -v M="$_cov_marker" -v X="$_cov_excl" -v Y="$_cov_excl2" '
       function flush() { if (have) { printf "%d\t%s\n", top, cur; have = 0 } }
       NR == FNR {
         line = $0
@@ -316,6 +324,7 @@ coverage_scan() {
         # files of the kit itself (coverage_kit_prefix) -- but NOT <kit>/project/: surfaces.conf and the
         # project map are the rules of the project itself, and an edit to them needs a gate.
         if (X != "" && index($0, X) == 1 && index($0, X "project/") != 1) next
+        if (Y != "" && index($0, Y) == 1 && index($0, Y "project/") != 1) next
         for (k = 1; k <= ni; k++) if ($0 ~ ign[k]) next
         for (k = 1; k <= nr_; k++) if (rtier[k] > top && $0 ~ rex[k]) top = rtier[k]
       }

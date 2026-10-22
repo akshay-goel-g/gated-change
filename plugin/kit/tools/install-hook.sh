@@ -17,6 +17,8 @@ set -uo pipefail
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
 SRC="$KIT/templates/pre-push"
+. "$KIT/tools/lib/data-root.sh"
+data_root_require install-hook.sh
 CONF="${PIPELINE_DATA:-$KIT}/project/surfaces.conf"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
@@ -63,7 +65,11 @@ PREFIX="${PREFIX%/}"
 [ -n "$PREFIX" ] || PREFIX="."
 RENDERED="$(mktemp 2>/dev/null)" || { echo "cannot create a temp file" >&2; exit 2; }
 trap 'rm -f "$RENDERED"' EXIT
-sed "s|^PIPELINE_DIR=\"\${PIPELINE_DIR:-.pipeline}\"|PIPELINE_DIR=\"\${PIPELINE_DIR:-$PREFIX}\"|" "$SRC" > "$RENDERED"
+# The data directory is baked in the same way when one is set now (data_root_require above has vetted it): the hook
+# must enforce the surfaces file this installer just validated, not whatever the pusher's environment holds.
+DATA_BAKE="${PIPELINE_DATA:-}"
+sed -e "s|^PIPELINE_DIR=\"\${PIPELINE_DIR:-.pipeline}\"|PIPELINE_DIR=\"\${PIPELINE_DIR:-$PREFIX}\"|" \
+    -e "s|^PIPELINE_DATA=\"\${PIPELINE_DATA:-}\"|PIPELINE_DATA=\"\${PIPELINE_DATA:-$DATA_BAKE}\"|" "$SRC" > "$RENDERED"
 
 if [ -e "$DEST" ] && [ "$FORCE" -eq 0 ]; then
   # Compare what WOULD be installed, not the raw template: the installed copy has its PIPELINE_DIR rewritten to this
@@ -89,4 +95,4 @@ echo "  Guarding $RULES T4 rule(s) from $CONF:"
 grep '^T4::' "$CONF" | sed -e 's/^T4:://' -e 's/\(.*\)::/  \1  → /' | sed 's/^/    /'
 echo
 echo "  It blocks a push touching those paths unless a report in"
-echo "  .pipeline/security-reports names a commit that contains every one of those changes."
+echo "  ${PIPELINE_DATA:-.pipeline}/security-reports names a commit that contains every one of those changes."

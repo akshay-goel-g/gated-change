@@ -289,19 +289,42 @@ $EDITOR .pipeline/project/surfaces.conf
 ```
 
 Optional, Claude Code only: install the gate subagents so a gate review starts in a fresh context
-with no `CLAUDE.md` loaded (`omitClaudeMd`), a read-only tool list, and the model for its tier:
+with no `CLAUDE.md` loaded (`omitClaudeMd`), a restricted tool list, and the model for its tier. Why this
+matters: a default subagent inherits your `CLAUDE.md` and auto-memory, which hold the author's own account of the
+work, so a "blind" G6, G7 or G8 review is not blind unless those are switched off:
 
 ```bash
 mkdir -p .claude/agents && cp .pipeline/templates/agents/*.md .claude/agents/
 ```
 
 Each agent's `model:` is copied from the tier in `models.conf`; if you change an ID there, change it in
-the agent files too (a test keeps the kit's own copies in step). Auto-memory is not switched off by
-the agent file: set `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for the session that spawns the gates.
+the agent files too (a test keeps the kit's own copies in step, not your installed ones). `inherit`, used for
+G8, means the session's own model. Auto-memory is not switched off by the agent file: set
+`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` for the session that spawns the gates, and check a gate is clean by asking
+it to list what instructions files it was given.
+
+"Restricted" is exactly this and no more: G1 and G3 can only read; G2 can read and fetch web pages; G4 to G7 can
+read and run shell commands (they must run tests and git), and a shell command can write, so "do not edit files" is
+an instruction to them, not an enforced limit; G8 may use any tool except Edit, Write and NotebookEdit, so it can
+drive a browser or the app. Widen or narrow a list in your copy if your gates need more.
 
 Keeping your files apart from the kit's code (for a runner whose code directory is shared or read-only):
 set `PIPELINE_DATA=<dir>` and the tools read and write `project/`, `ledger.jsonl`, `dashboard.html` and
 `security-reports/` there instead of beside the code. Unset, they use the kit's own directory, as before.
+The rules for the value:
+
+- It must be an **absolute** path to an **existing directory inside this repository**. These files are the trust
+  configuration (what the push hook guards, which commands count as evidence, what compliance reads), so a value
+  left over from another project is refused (`REFUSED`, or `BLOCKED` for the push hook) rather than obeyed.
+  `PIPELINE_DATA_EXTERNAL=1` waives only the "inside this repository" rule, for a deliberately shared directory.
+- Seed it first: `mkdir -p "$PIPELINE_DATA" && cp -r .pipeline/project "$PIPELINE_DATA/project"`. An earlier
+  `.pipeline/project` and `.pipeline/ledger.jsonl` are not read once it is set; remove them or leave them as history.
+  Commit the directory like any other project file.
+- Set it **before** running `install-hook.sh` and `install-claude-hook.sh`: they bake the value into the installed
+  pre-push hook and into the Claude Code hook commands (the hooks inherit no environment). Change it later and
+  re-run both with `--force` where they offer it, or edit the baked value.
+- Not covered yet: `.install-base` (the install cutoff) still lives in the kit directory, so a read-only shared
+  code directory cannot record it and counts the whole history until it can.
 
 This is the one step that needs you to think. The shipped file describes a browser
 extension — **delete its rows and write your own**, or start from one of the

@@ -78,6 +78,8 @@ set -uo pipefail
 # only way this repo dogfooded it. Mirrors dashboard.sh's KIT resolution.
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
+. "$_HERE/lib/data-root.sh"
+data_root_require reconcile.sh
 CONF="${CONF:-${PIPELINE_DATA:-$KIT}/project/surfaces.conf}"
 
 # Which gates a tier requires is the router's fact, not this script's.
@@ -449,6 +451,15 @@ if [ -n "$KIT_PREFIX" ]; then
     echo "Note: $_dropped file(s) under ${KIT_PREFIX} excluded — the kit itself, not the project. INCLUDE_KIT=1 to include." >&2
 fi
 
+# The data directory (PIPELINE_DATA) is excluded the same way: its ledger, dashboard and reports are written by the
+# pipeline, and a commit of them used to be tiered as project work (a `ledger` row in the shipped example made it T4).
+# Its project/ directory is the project's own and stays in.
+_dp=""
+[ -z "${PIPELINE_DATA:-}" ] || _dp="$(git -C "$PIPELINE_DATA" rev-parse --show-prefix 2>/dev/null)"
+if [ -n "$_dp" ] && [ "${INCLUDE_KIT:-0}" != "1" ]; then
+  CHANGED=$(printf '%s\n' "$CHANGED" | awk -v p="$_dp" 'index($0, p) != 1 || index($0, p "project/") == 1')
+fi
+
 # Routing your project against the KIT's own surfaces fails open, which is why
 # this refuses rather than warns. Nothing of yours matches rules written about
 # tools/reconcile.sh and core/cards/, so every change lands at T0, no gate is
@@ -489,7 +500,8 @@ if [ "$_self_installed" -eq 1 ] && grep -q '^# SELF: gated-change$' "$CONF" 2>/d
   echo "  pipeline reporting success while doing nothing, which is worse than no" >&2
   echo "  pipeline at all." >&2
   echo >&2
-  echo "  cp ${KIT_PREFIX}templates/project/surfaces.conf ${KIT_PREFIX}project/surfaces.conf" >&2
+  _dest="${KIT_PREFIX}project/surfaces.conf"; [ -z "${PIPELINE_DATA:-}" ] || _dest="$PIPELINE_DATA/project/surfaces.conf"
+  echo "  cp ${KIT_PREFIX}templates/project/surfaces.conf $_dest" >&2
   echo >&2
   echo "  then answer the five questions in it." >&2
   exit 2

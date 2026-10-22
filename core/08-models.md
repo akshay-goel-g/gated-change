@@ -44,8 +44,9 @@ warrants it on every reasoning gate. Cost scales with what is at risk — the sa
 the router.
 
 **What each tier is called today** lives in `project/models.conf` (strongest, mid, fast, interactive), so a
-model retirement is a one-line change there, not an edit to eight cards. The Claude Code gate agents in
-`templates/agents/` take their `model:` from it.
+model retirement is one edit there plus the `model:` line of each Claude Code gate agent in `templates/agents/`
+(a subagent's model is fixed in its frontmatter, so those lines are copies; a test keeps the kit's own in step),
+and never an edit to the eight cards.
 
 **Record what you picked.** `ledger.sh add --model <name>` (or export `PIPELINE_MODEL`), and
 it warns when you do not. Not bookkeeping for its own sake: on the first real end-to-end run

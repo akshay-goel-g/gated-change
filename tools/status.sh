@@ -42,6 +42,8 @@ _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="${KIT:-$(dirname "$_HERE")}"
 # DATA = where this project's own files live (project/, ledger.jsonl, dashboard.html, security-reports/). The kit's
 # directory unless PIPELINE_DATA says otherwise (D5): a plugin's code directory is shared and read-only.
+. "$KIT/tools/lib/data-root.sh"
+data_root_require status.sh
 DATA="${PIPELINE_DATA:-$KIT}"
 CONF="${SURFACES:-$DATA/project/surfaces.conf}"
 LEDGER="${LEDGER:-$DATA/ledger.jsonl}"
@@ -277,7 +279,7 @@ if [ -n "$LAST_COMMIT" ] && [ -n "$SINCE_REF" ]; then
   fi
 fi
 
-SCAN_OUT="$(coverage_scan "$CONF" "$RANGE" "$SCANNED" "$(coverage_kit_prefix "$KIT")")"
+SCAN_OUT="$(coverage_scan "$CONF" "$RANGE" "$SCANNED" "$(coverage_kit_prefix "$KIT")" "$(coverage_data_prefix)")"
 
 HIGHEST=0
 T4_LIST=""
@@ -581,7 +583,7 @@ if [ -f "$HOOKS_DIR/pre-push" ]; then
   # that destroys the second case. Named as a finding, not fixed silently:
   # the parenthetical below already hedged this while the headline still
   # didn't, which is its own kind of wrong answer.
-  _hook_norm='s|^PIPELINE_DIR=.*|PIPELINE_DIR=|'
+  _hook_norm='s|^PIPELINE_DIR=.*|PIPELINE_DIR=|;s|^PIPELINE_DATA=.*|PIPELINE_DATA=|'
   if [ -f "$KIT/templates/pre-push" ] \
      && ! diff -q <(sed "$_hook_norm" "$HOOKS_DIR/pre-push") \
                   <(sed "$_hook_norm" "$KIT/templates/pre-push") >/dev/null 2>&1; then
@@ -669,9 +671,9 @@ if [ "$_is_installed" -eq 1 ] && grep -q '^# SELF: gated-change$' "$CONF" 2>/dev
   say "      Every number above may be describing the kit's history, not your project's."
   say ""
   say "      Start clean:"
-  say "        cp $KIT/templates/project/surfaces.conf $KIT/project/surfaces.conf"
-  say "        rm -f $KIT/ledger.jsonl $KIT/dashboard.html"
-  say "        rm -rf $KIT/security-reports"
+  say "        cp $KIT/templates/project/surfaces.conf $DATA/project/surfaces.conf"
+  say "        rm -f $DATA/ledger.jsonl $DATA/dashboard.html"
+  say "        rm -rf $DATA/security-reports"
   say "      then answer the five questions in surfaces.conf."
 fi
 

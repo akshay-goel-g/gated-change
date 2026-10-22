@@ -1,6 +1,7 @@
 ---
 name: pipeline-gate-g3
 description: Runs gate G3 Craft of the gated-change pipeline in a fresh context. Use only when the router or reconcile.sh mandates G3; hand it the card path and the inputs the card lists, never your own explanation.
+tools: Read, Grep, Glob
 model: claude-sonnet-5-5
 omitClaudeMd: true
 ---

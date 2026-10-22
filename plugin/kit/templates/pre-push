@@ -34,8 +34,35 @@ trap '' PIPE
 # the repo, which is how gated-change runs this hook on itself.
 PIPELINE_DIR="${PIPELINE_DIR:-.pipeline}"
 # PIPELINE_DATA (D5) separates this project's files from the kit's code; unset, both are under PIPELINE_DIR as before.
-SURFACES="${SURFACES:-${PIPELINE_DATA:-$PIPELINE_DIR}/project/surfaces.conf}"
-REPORTS="${REPORTS:-${PIPELINE_DATA:-$PIPELINE_DIR}/security-reports}"
+# install-hook.sh bakes the data directory in on the next line when one was set at install time: a hook inherits no
+# environment from whoever pushes, so without that the installer would validate one surfaces file and the hook
+# would enforce another. The value must be an absolute directory INSIDE this repository (PIPELINE_DATA_EXTERNAL=1
+# waives that); anything else BLOCKS the push, because it would judge this repository by some other project's rules.
+# (This is an inline copy of tools/lib/data-root.sh: a hook cannot rely on the kit being readable. A test pins both.)
+PIPELINE_DATA="${PIPELINE_DATA:-}"
+if [ -n "$PIPELINE_DATA" ]; then
+  _dr_ok=0; _dr_n=0; _dr_p="${PIPELINE_DATA%/}"; _dr_top="$(git rev-parse --show-toplevel 2>/dev/null)"
+  case "$PIPELINE_DATA" in /*|[A-Za-z]:/*) [ -d "$PIPELINE_DATA" ] && _dr_ok=1;; esac
+  if [ "$_dr_ok" = 1 ] && [ "${PIPELINE_DATA_EXTERNAL:-0}" != 1 ]; then
+    _dr_ok=0
+    while [ "$_dr_n" -lt 100 ]; do
+      _dr_n=$((_dr_n + 1))
+      if [ -n "$_dr_p" ] && [ -n "$_dr_top" ] && [ -e "$_dr_p" ] && [ "$_dr_p" -ef "$_dr_top" ]; then _dr_ok=1; break; fi
+      case "$_dr_p" in */*) ;; *) break;; esac
+      [ "${_dr_p%/*}" != "$_dr_p" ] || break
+      _dr_p="${_dr_p%/*}"; [ -n "$_dr_p" ] || _dr_p="/"
+    done
+  fi
+  if [ "$_dr_ok" != 1 ]; then
+    echo "BLOCKED: PIPELINE_DATA='$PIPELINE_DATA' is not an absolute directory inside this repository." >&2
+    echo "  It would make this push be judged by another project's surfaces.conf and reports. Unset it, or" >&2
+    echo "  set PIPELINE_DATA_EXTERNAL=1 if the data directory is meant to live outside the repository." >&2
+    exit 1
+  fi
+fi
+DATA_DIR="${PIPELINE_DATA:-$PIPELINE_DIR}"
+SURFACES="${SURFACES:-$DATA_DIR/project/surfaces.conf}"
+REPORTS="${REPORTS:-$DATA_DIR/security-reports}"
 
 # Derive the T4 rules from the surfaces file. Split on the LAST "::" the same
 # way reconcile.sh does, because a regex may contain ":" freely.
@@ -410,8 +437,12 @@ fi
 #     current between pushes; this hook keeps the baked-in fallback (and
 #     every file:// viewer) close to current across them.
 DASHBOARD_SH="$PIPELINE_DIR/tools/dashboard.sh"
-LEDGER_FILE="${PIPELINE_DATA:-$PIPELINE_DIR}/ledger.jsonl"
-DASHBOARD_OUT="${PIPELINE_DATA:-$PIPELINE_DIR}/dashboard.html"
+LEDGER_FILE="$DATA_DIR/ledger.jsonl"
+DASHBOARD_OUT="$DATA_DIR/dashboard.html"
+# `git show HEAD:<path>` wants a path relative to the repository root; DASHBOARD_OUT is absolute when PIPELINE_DATA is
+# set, which made every comparison read "nothing committed" and every push commit a regenerated dashboard.
+# `ls-files --full-name` accepts either form and prints the root-relative name; empty when the file is not tracked yet.
+DASH_REL="$(git ls-files --full-name -- "$DASHBOARD_OUT" 2>/dev/null | head -n 1)"
 
 if [ -f "$DASHBOARD_SH" ] && [ -f "$LEDGER_FILE" ]; then
   # The committed version, generated-timestamp blanked, to compare against
@@ -430,8 +461,8 @@ if [ -f "$DASHBOARD_SH" ] && [ -f "$LEDGER_FILE" ]; then
   #     a line of its own.
   NORM='s/"generated":"[^"]*"/"generated":""/;s/"kitCommit":"[^"]*"/"kitCommit":""/;s/^"coverage":.*$/"coverage":null,/'
   PREV_NORM=""
-  git show "HEAD:$DASHBOARD_OUT" >/dev/null 2>&1 && \
-    PREV_NORM=$(git show "HEAD:$DASHBOARD_OUT" 2>/dev/null | sed "$NORM")
+  [ -n "$DASH_REL" ] && git show "HEAD:$DASH_REL" >/dev/null 2>&1 && \
+    PREV_NORM=$(git show "HEAD:$DASH_REL" 2>/dev/null | sed "$NORM")
 
   # Capture stderr only — dashboard.sh's normal-run chatter ("Wrote ...",
   # gate/warning counts) goes there by design (see its own header), and is
@@ -440,7 +471,7 @@ if [ -f "$DASHBOARD_SH" ] && [ -f "$LEDGER_FILE" ]; then
     if [ "$(sed "$NORM" "$DASHBOARD_OUT")" = "$PREV_NORM" ]; then
       # Only the timestamp moved. Put back exactly what was committed, so a
       # push that touched no ledger data leaves no working-tree noise at all.
-      git show "HEAD:$DASHBOARD_OUT" > "$DASHBOARD_OUT" 2>/dev/null
+      git show "HEAD:$DASH_REL" > "$DASHBOARD_OUT" 2>/dev/null
     else
       git add "$DASHBOARD_OUT"
       git commit -q -m "auto: regenerate dashboard.html (pre-push)" -- "$DASHBOARD_OUT"

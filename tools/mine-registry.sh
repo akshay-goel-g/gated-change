@@ -22,6 +22,8 @@ set -euo pipefail
 # Default lands in THIS kit's project/ (<kit>/project/registry-draft.md), wherever the
 # script is run from. It used to be ./project/..., i.e. the repo root, so an install's draft
 # landed outside .pipeline/ and the next step's `cp -r templates/project` nested (E7).
+. "$(dirname "${BASH_SOURCE[0]}")/lib/data-root.sh"
+data_root_require mine-registry.sh
 OUT="${1:-${PIPELINE_DATA:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/project/registry-draft.md}"
 SINCE="${SINCE:-3 years ago}"
 MAX_FILES="${MAX_FILES:-15}"

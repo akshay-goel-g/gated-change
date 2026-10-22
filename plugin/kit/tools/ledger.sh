@@ -136,31 +136,16 @@ set -uo pipefail
 # pick the right default ledger) and by detect_kit() below.
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
 
-# The installed-copy convention is `.pipeline/ledger.jsonl`, relative to the
-# CONSUMING project's root — correct when a project's own git repo is bigger
-# than the kit directory it contains. But when the kit IS the repo (self-hosting,
-# this repo), that convention resolves to a stray `.pipeline/ledger.jsonl`
-# instead of the `ledger.jsonl` the README calls "the evidence" — reconcile.sh
-# already tells these two cases apart (`KIT_PREFIX`, `SELF: gated-change`);
-# ledger.sh never did, so an add here silently wrote to the wrong file and
-# reported success while doing it — the exact failure class this whole file
-# exists to prevent, just never pointed at its own default.
-#
-# `--show-prefix` rather than comparing two `--show-toplevel` paths: empty means
-# KIT_ROOT already IS the repo root (self-hosting), non-empty means it is nested
-# under something bigger (installed). This never compares a `pwd`-built path
-# against a git-built one — reconcile.sh's own comment two files over warns that
-# `git rev-parse --show-toplevel` and `pwd` disagree about drive-letter form on
-# Windows (`D:/...` vs `/d/...`), and an earlier version of this exact fix did
-# precisely that comparison and silently always resolved to "installed".
-#
-# D5: the default is now ONE absolute path in both cases, $PIPELINE_DATA/ledger.jsonl, where PIPELINE_DATA defaults to
-# the kit's own directory. For this repo and for an install at <project>/.pipeline that is the same file as before; what
-# changes is that it no longer depends on the caller's cwd (status.sh, the Stop hook and the dashboard already resolved
-# it against the kit, so `ledger.sh add` from a subdirectory wrote a ledger the others never read). A vendored copy
-# somewhere other than .pipeline/ now writes inside itself, as its status.sh always read it.
-# PIPELINE_DATA is the one switch that separates DATA (project/, ledger.jsonl, security-reports/) from kit CODE, for a
-# runner (the plugin) whose code directory is read-only and shared between projects. LEDGER still overrides.
+# Where the ledger lives by default: $PIPELINE_DATA/ledger.jsonl, one absolute path whatever the caller's cwd.
+# PIPELINE_DATA defaults to the kit's own directory, which for this repo (the kit IS the repo) is <repo>/ledger.jsonl and
+# for an install at <project>/.pipeline is <project>/.pipeline/ledger.jsonl. status.sh, the Stop hook and the dashboard
+# resolve the same path, so an `add` from a subdirectory no longer writes a ledger the others never read.
+# PIPELINE_DATA is the one switch that separates DATA (project/, ledger.jsonl, dashboard.html, security-reports/) from kit
+# CODE, for a runner whose code directory is read-only and shared between projects. It must lie inside the repository
+# being worked on (tools/lib/data-root.sh), because project/ and commands.conf are trust configuration: a value left over
+# from another project would otherwise judge this one by that project's rules. LEDGER still overrides the ledger path.
+. "$KIT_ROOT/tools/lib/data-root.sh"
+data_root_require ledger.sh
 DATA_ROOT="${PIPELINE_DATA:-$KIT_ROOT}"
 LEDGER="${LEDGER:-$DATA_ROOT/ledger.jsonl}"
 
@@ -270,7 +255,7 @@ looks_like_gate()  { case "$1" in G*) is_uint "${1#G}";; *) return 1;; esac; }
 # and lib/coverage.sh exist. Empty when git cannot answer, and then
 # change_is_branchy() below falls back to its hand-enumerated list -- the
 # behaviour this check had before R-005. Adds no dependency: this file already
-# shells out to git at load (the KIT_ROOT/LEDGER block above) and per write
+# shells out to git per write
 # (detect_commit).
 . "$(dirname "${BASH_SOURCE[0]}")/lib/default-branch.sh"
 DEFAULT_BRANCH="$(resolve_default_branch)"
@@ -625,8 +610,8 @@ citation_ok() {
   [ -n "$f" ] && [ "$n" -ge 1 ] || { CITE_WHY="the line must be 1 or more"; return 1; }
   case "$f" in /*|[A-Za-z]:*) CITE_WHY="absolute paths are not accepted; cite a path inside the repository"; return 1;;
                ..|../*|*/..|*/../*) CITE_WHY="a path with .. is not accepted"; return 1;; esac
-  # Resolved against the repository the KIT lives in, the same one evidence_run uses, not the caller's cwd.
-  root="$(git -C "$DATA_ROOT" rev-parse --show-toplevel 2>/dev/null)" || { CITE_WHY="the kit is not inside a git repository"; return 1; }
+  # Resolved against the repository holding the data directory (the one evidence_run uses), not the caller's cwd.
+  root="$(git -C "$DATA_ROOT" rev-parse --show-toplevel 2>/dev/null)" || { CITE_WHY="$DATA_ROOT is not inside a git repository"; return 1; }
   [ -f "$root/$f" ] || { CITE_WHY="no such file '$f' in the repository"; return 1; }
   local _lines; _lines="$(awk 'END{print NR}' "$root/$f")"
   [ "$n" -le "$_lines" ] || { CITE_WHY="'$f' has fewer than $n lines"; return 1; }

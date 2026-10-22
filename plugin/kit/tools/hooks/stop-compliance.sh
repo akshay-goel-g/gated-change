@@ -33,7 +33,19 @@ case "$MAX_ATTEMPTS" in ''|*[!0-9]*) MAX_ATTEMPTS=3;; esac
 
 _HERE="$(cd "$(dirname "$0")" && pwd)"
 KIT="$(cd "$_HERE/../.." && pwd)"
-LEDGER="${LEDGER:-${PIPELINE_DATA:-$KIT}/ledger.jsonl}"
+DATA="${PIPELINE_DATA:-$KIT}"
+LEDGER="${LEDGER:-$DATA/ledger.jsonl}"
+
+# A PIPELINE_DATA that is not usable (not absolute, missing, or outside this repository) means the ledger cannot be
+# trusted to be this project's. Fail open, as every fault here does, but say so where the user can see it.
+if [ -n "${PIPELINE_DATA:-}" ]; then
+  . "$KIT/tools/lib/data-root.sh"
+  if ! data_root_check "$PIPELINE_DATA"; then
+    printf '{"systemMessage":"gated-change Stop hook: PIPELINE_DATA is not usable (%s), so compliance was NOT checked."}\n' \
+      "$(printf '%s' "$DATA_ROOT_WHY" | tr -d '\\"\000-\037')"
+    exit 0
+  fi
+fi
 
 INPUT="$(cat)"
 
@@ -46,7 +58,7 @@ esac
 
 [ -f "$LEDGER" ] || exit 0
 [ -f "$KIT/tools/ledger.sh" ] || exit 0
-git -C "$KIT" rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
+git -C "$DATA" rev-parse --show-toplevel >/dev/null 2>&1 || exit 0
 
 ROUTE="$(grep '"type":"route"' "$LEDGER" 2>/dev/null | tail -n 1)"
 [ -n "$ROUTE" ] || exit 0
@@ -61,14 +73,14 @@ case "$CHANGE" in *\\*|*\"*) exit 0;; esac
 
 # Cross-turn cap: the state is HEAD + the working tree + the ledger. Progress changes it and re-arms
 # the hook; a stuck state (nothing changed since the last block) is blocked at most MAX_ATTEMPTS times.
-GITDIR="$(git -C "$KIT" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
+GITDIR="$(git -C "$DATA" rev-parse --absolute-git-dir 2>/dev/null)" || exit 0
 STATE="$GITDIR/gated-change-stop-state"
 _hash() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'
   elif command -v shasum >/dev/null 2>&1; then shasum -a 256 | awk '{print $1}'
   else cksum | awk '{print $1}'; fi
 }
-FP="$( { git -C "$KIT" rev-parse HEAD 2>/dev/null; git -C "$KIT" status --porcelain 2>/dev/null; wc -c < "$LEDGER" 2>/dev/null; } | _hash)"
+FP="$( { git -C "$DATA" rev-parse HEAD 2>/dev/null; git -C "$DATA" status --porcelain 2>/dev/null; wc -c < "$LEDGER" 2>/dev/null; } | _hash)"
 PREV_FP=""; PREV_N=0
 if [ -f "$STATE" ]; then
   read -r PREV_FP PREV_N < "$STATE" 2>/dev/null || true
@@ -80,7 +92,7 @@ if [ "$PREV_FP" = "$FP" ] && [ "$PREV_N" -ge "$MAX_ATTEMPTS" ]; then exit 0; fi
 PASSFILE="$GITDIR/gated-change-stop-pass"
 if [ -f "$PASSFILE" ] && [ "$(cat "$PASSFILE" 2>/dev/null)" = "$FP" ]; then exit 0; fi
 
-OUT="$(cd "$(git -C "$KIT" rev-parse --show-toplevel)" && LEDGER="$LEDGER" bash "$KIT/tools/ledger.sh" compliance --change "$CHANGE" --tier "$TIER" --round "$ROUND" 2>&1)"
+OUT="$(cd "$(git -C "$DATA" rev-parse --show-toplevel)" && LEDGER="$LEDGER" bash "$KIT/tools/ledger.sh" compliance --change "$CHANGE" --tier "$TIER" --round "$ROUND" 2>&1)"
 RC=$?
 [ "$RC" -ne 0 ] || { rm -f "$STATE" 2>/dev/null; printf '%s\n' "$FP" > "$PASSFILE" 2>/dev/null || true; exit 0; }
 # 2 is a usage error or a tool fault, not a verdict: fail open.

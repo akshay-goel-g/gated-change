@@ -38,7 +38,8 @@ logs_with:    ledger.sh add --change <name> --gate G8 --tier <T> --round <n> --o
               --finding "<severity>::<file:line>::<claim>"      # 02-gates.md "Running a gate"
               [--evidence <file:line> | --evidence-cmd EVIDENCE::<name>]   # a fresh T3/T4 pass must cite: an info --finding with a real file:line, or one of these
               # Dogfood is blind to the source: cite what you USED, not the code, e.g. the README/docs line you followed
-              # (`--evidence README.md:42`), or a committed smoke command (`--evidence-cmd EVIDENCE::smoke`)
+              # (`--evidence <kit>/README.md:42`, i.e. `.pipeline/README.md:42` in an installed project, where the path is
+              # relative to the repository root and the file must be committed or staged), or a committed smoke command (`--evidence-cmd EVIDENCE::smoke`)
               [--withhold-breached true|false]      # optional, trial — core/11-evolution.md Step 7
               [--tokens-in <n> --tokens-out <n>]    # optional, paired — 04-ledger.md; computes --tokens
 escalate_to:  G1, when the surprise is that the feature is not what was wanted

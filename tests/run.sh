@@ -8993,17 +8993,244 @@ test_gate_agents_match_their_cards_and_models_conf() {
     grep -qx "model: $want" "$agent" && _ok || _fail "$id: agent model is not '$want' (tier $tier in models.conf)"
     grep -qx "omitClaudeMd: true" "$agent" && _ok || _fail "$id: agent does not set omitClaudeMd"
     grep -qx "name: pipeline-gate-$lid" "$agent" && _ok || _fail "$id: agent name"
+    grep -qE "^description: .*gate $id " "$agent" && _ok || _fail "$id: agent description does not name its gate"
+    grep -q "Do not run ledger.sh and do not edit files" "$agent" && _ok || _fail "$id: agent lost its no-ledger/no-edit instruction"
     grep -qF "$(sed -n 's/^withhold:[[:space:]]*//p' "$card" | sed 's/[[:space:]]*$//')" "$agent" && _ok || _fail "$id: agent does not carry the card's withhold line"
   done
 }
 
 test_findings_schema_matches_the_ledger_vocabulary() {
   local f="$KIT/core/schemas/findings.schema.json"
-  grep -q '"enum": \["blocking", "minor", "info", "out-of-scope"\]' "$f" && _ok || _fail "schema severity enum differs from ledger.sh"
-  grep -q 'blocking|minor|info|out-of-scope) ;;' "$KIT/tools/ledger.sh" && _ok || _fail "ledger.sh severity case moved: update this test"
+  newrepo
+  # Behaviour, not text: every severity the schema lists is accepted by `ledger.sh add --finding`, and one it does not list is refused.
+  local sev claim
+  for sev in $(grep -o '"enum": \[[^]]*\]' "$f" | head -n 1 | grep -o '"[a-z-]*"' | tr -d '"' | grep -v '^enum$'); do
+    claim="c"; [ "$sev" = "out-of-scope" ] && claim="c filed:todo.md"
+    LAST_OUT="$(led add --change sch --gate G4 --tier T1 --round 1 --outcome pass --confidence fresh --model m --finding "$sev::tools/ledger.sh:1::$claim" 2>&1)"; LAST_EXIT=$?
+    assert_exit 0 "severity '$sev' from the schema must be accepted by ledger.sh"
+  done
+  LAST_OUT="$(led add --change sch --gate G4 --tier T1 --round 2 --outcome pass --confidence fresh --model m --finding "catastrophic::tools/ledger.sh:1::c" 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "a severity outside the schema must be refused"
+  # The conditional rules are what keep the schema honest about ledger.sh's refusals.
+  grep -q '"required": \["severity", "location", "claim"\]' "$f" && _ok || _fail "schema lost its required fields"
+  grep -q 'filed:\[^ \]' "$f" && _ok || _fail "schema lost the out-of-scope filed:<ref> rule"
+  grep -q '"enum": \["blocking", "minor"\]' "$f" && _ok || _fail "schema lost the blocking/minor location rule"
+  LAST_OUT="$(led add --change sch --gate G4 --tier T1 --round 3 --outcome pass --confidence fresh --model m --finding "blocking::::no location" 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "ledger.sh refuses a blocking finding with no location, as the schema says"
   if [ -n "$PY" ]; then
     "$PY" -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$f" 2>/dev/null && _ok || _fail "findings.schema.json is not valid JSON"
   else _skip "no python — cannot validate JSON"; fi
+}
+
+# ---- Round 2 of the D1/D2/D5 gates: PIPELINE_DATA through every consumer, and the gate agents' tool lists.
+# G5 found that reverting PIPELINE_DATA in reconcile, pre-push, status, the hooks, the installers or the dashboard passed
+# every test; G4/G7 reproduced a cross-project push passing and an absolute data path recommitting the dashboard.
+_other_project() { OTHER="$TMPROOT/other-project.$$"; mkdir -p "$OTHER"; }
+
+test_data_root_check_accepts_inside_and_refuses_everything_else() {
+  newrepo
+  mkdir -p "$REPO/pdata" "$REPO/pd'x"
+  _other_project
+  local chk='. "$KIT/tools/lib/data-root.sh"; data_root_check "$1"'
+  ( cd "$REPO" && KIT="$KIT" bash -c "$chk" _ "$REPO/pdata" ) >/dev/null 2>&1 && _ok || _fail "an absolute directory inside the repository must be accepted"
+  ( cd "$REPO" && KIT="$KIT" bash -c "$chk" _ "pdata" ) >/dev/null 2>&1 && _fail "a relative path was accepted" || _ok
+  ( cd "$REPO" && KIT="$KIT" bash -c "$chk" _ "$REPO/missing" ) >/dev/null 2>&1 && _fail "a missing directory was accepted" || _ok
+  ( cd "$REPO" && KIT="$KIT" bash -c "$chk" _ "$OTHER" ) >/dev/null 2>&1 && _fail "a directory outside the repository was accepted" || _ok
+  ( cd "$REPO" && KIT="$KIT" PIPELINE_DATA_EXTERNAL=1 bash -c "$chk" _ "$OTHER" ) >/dev/null 2>&1 && _ok || _fail "PIPELINE_DATA_EXTERNAL=1 must waive the containment rule"
+  ( cd "$REPO" && KIT="$KIT" PIPELINE_DATA_EXTERNAL=1 bash -c "$chk" _ "$REPO/pd'x" ) >/dev/null 2>&1 && _fail "a quote in the path was accepted (it cannot be baked into a hook)" || _ok
+  ( cd "$TMPROOT" && KIT="$KIT" bash -c "$chk" _ "$REPO/pdata" ) >/dev/null 2>&1 && _fail "accepted outside any repository" || _ok
+}
+
+test_every_tool_refuses_a_pipeline_data_from_another_project() {
+  _data_repo
+  _other_project
+  local c
+  for c in \
+    "bash .pipeline/tools/ledger.sh add --change c --gate G4 --tier T1 --outcome pass --model m --confidence fresh" \
+    "bash .pipeline/tools/status.sh" \
+    "BASE=$BASE_SHA bash .pipeline/tools/reconcile.sh T1" \
+    "bash .pipeline/tools/dashboard.sh" \
+    "bash .pipeline/tools/mine-registry.sh" \
+    "bash .pipeline/tools/install-hook.sh" \
+    "bash .pipeline/tools/install-claude-hook.sh"; do
+    LAST_OUT="$( cd "$REPO" && PIPELINE_DATA="$OTHER" bash -c "$c" 2>&1 )"; LAST_EXIT=$?
+    assert_exit 2 "$c"
+    assert_contains "PIPELINE_DATA is not usable"
+  done
+  [ -e "$OTHER/ledger.jsonl" ] && _fail "a refused tool still wrote into the foreign directory" || _ok
+}
+
+test_status_reads_the_ledger_and_dashboard_from_the_data_directory() {
+  _data_repo
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "pdata/ledger.jsonl"
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/ledger.sh add --change c --gate G4 --tier T1 --outcome pass --model m --confidence fresh --evidence .pipeline/tools/ledger.sh:1 ) >/dev/null 2>&1
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/dashboard.sh ) >/dev/null 2>&1
+  [ -f "$REPO/pdata/dashboard.html" ] && _ok || _fail "dashboard.sh did not write into the data directory"
+  [ -e "$REPO/.pipeline/dashboard.html" ] && _fail "dashboard.sh also wrote beside the kit" || _ok
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "dashboard.html present"
+}
+
+test_dashboard_defaults_do_not_depend_on_the_callers_cwd() {
+  newrepo
+  printf '{"type":"gate","date":"2026-08-14","change":"c1","tier":"T1","gate":"G1","round":1,"commit":"aaa1111","outcome":"pass","findings":0,"note":"n"}\n' > "$REPO/.pipeline/ledger.jsonl"
+  mkdir -p "$REPO/src/deep"
+  ( cd "$REPO/src/deep" && bash ../../.pipeline/tools/dashboard.sh ) >/dev/null 2>&1
+  [ -f "$REPO/.pipeline/dashboard.html" ] && _ok || _fail "dashboard.html did not land beside the kit's ledger"
+  [ -e "$REPO/src/deep/.pipeline" ] && _fail "a stray .pipeline appeared under the caller's cwd" || _ok
+}
+
+test_evidence_cmd_reads_commands_conf_from_the_data_directory() {
+  _data_repo
+  printf 'EVIDENCE::t::echo it-ran\n' > "$REPO/pdata/project/commands.conf"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "evidence" >/dev/null 2>&1
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/ledger.sh add --change c --gate G4 --tier T4 --outcome pass --model m --confidence fresh --evidence-cmd EVIDENCE::t 2>&1)"; LAST_EXIT=$?
+  assert_exit 0
+  assert_contains "it-ran"
+  LAST_OUT="$(cd "$REPO" && bash .pipeline/tools/ledger.sh add --change c --gate G4 --tier T4 --outcome pass --model m --confidence fresh --evidence-cmd EVIDENCE::t 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "without PIPELINE_DATA the kit-side commands.conf (absent here) is the only source"
+}
+
+test_reconcile_does_not_tier_the_data_directory() {
+  _data_repo
+  printf '{"type":"gate"}\n' > "$REPO/pdata/ledger.jsonl"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger moved" >/dev/null 2>&1
+  local base; base="$(git -C "$REPO" rev-parse HEAD~1)"
+  # Excluded, the commit leaves nothing to reconcile; counted as project work, a `ledger` row in the example surfaces tiers it.
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" BASE="$base" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_contains "nothing to reconcile"
+  LAST_OUT="$(cd "$REPO" && BASE="$base" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "nothing to reconcile"
+}
+
+# A rule that exists ONLY in the data directory's surfaces.conf, so reading the kit-side file instead is visible.
+_zzqx_rule_in_data_only() {
+  mkdir -p "$REPO/src/zzqx"
+  printf 'T4::(^|/)src/zzqx/::Zzqx, only the data directory knows\n' >> "$REPO/pdata/project/surfaces.conf"
+  printf 'x\n' > "$REPO/src/zzqx/seal.js"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "zzqx" >/dev/null 2>&1
+}
+
+test_reconcile_and_r0c_read_the_data_directorys_surfaces() {
+  _data_repo
+  _zzqx_rule_in_data_only
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" BASE="$BASE_SHA" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_contains "src/zzqx/seal.js"
+  LAST_OUT="$(cd "$REPO" && BASE="$BASE_SHA" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "Zzqx, only the data directory knows"
+  LAST_OUT="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$REPO/src/zzqx/seal.js" | ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "R0c must apply the data directory's T4 rule"
+  assert_contains "Zzqx"
+  LAST_OUT="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$REPO/src/zzqx/seal.js" | ( cd "$REPO" && bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; LAST_EXIT=$?
+  assert_exit 0 "without PIPELINE_DATA the kit-side file, which has no zzqx rule, applies"
+}
+
+# --- pre-push
+_data_report() { mkdir -p "$REPO/pdata/security-reports"; git -C "$REPO" rev-parse HEAD > "$REPO/pdata/security-reports/g7.md"; }
+_t4_commit() { printf 'token=2\n' > "$REPO/src/auth/existing.js"; git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "touch auth" >/dev/null 2>&1; }
+
+test_pre_push_blocks_when_pipeline_data_is_outside_the_repo() {
+  _data_repo
+  _other_project
+  _t4_commit
+  LAST_OUT="$(PIPELINE_DATA="$OTHER" hook 2>&1)"; LAST_EXIT=$?
+  assert_exit 1
+  assert_contains "BLOCKED: PIPELINE_DATA"
+}
+
+test_pre_push_enforces_the_data_directory_surfaces_and_reports() {
+  _data_repo
+  # The kit-side surfaces file guards nothing, so only the data directory's copy can block this push.
+  printf 'T1::(^|/)docs/::docs\n' > "$REPO/.pipeline/project/surfaces.conf"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "kit side guards nothing" >/dev/null 2>&1
+  _t4_commit
+  LAST_OUT="$(PIPELINE_DATA="$REPO/pdata" hook 2>&1)"; LAST_EXIT=$?
+  assert_exit 1 "the data directory's T4 rule must block an unreviewed auth push"
+  _data_report
+  LAST_OUT="$(PIPELINE_DATA="$REPO/pdata" hook 2>&1)"; LAST_EXIT=$?
+  assert_exit 0 "a report in the data directory's security-reports must satisfy it"
+}
+
+test_installed_pre_push_has_the_data_directory_baked_in() {
+  _data_repo
+  printf 'T1::(^|/)docs/::docs\n' > "$REPO/.pipeline/project/surfaces.conf"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "kit side guards nothing" >/dev/null 2>&1
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-hook.sh ) >/dev/null 2>&1
+  grep -q "^PIPELINE_DATA=\"\${PIPELINE_DATA:-$REPO/pdata}\"" "$REPO/.git/hooks/pre-push" && _ok || _fail "the data directory was not baked into the installed hook"
+  _t4_commit
+  # No PIPELINE_DATA in the pusher's environment: the installed hook must still enforce the data directory's rules.
+  LAST_OUT="$(cd "$REPO" && env -u PIPELINE_DATA BASE="$BASE_SHA" sh .git/hooks/pre-push 2>&1)"; LAST_EXIT=$?
+  assert_exit 1 "an installer that validated pdata must not install a hook that enforces something else"
+  # and status.sh does not call the correctly installed, baked hook a stale copy
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "pre-push hook installed"
+  assert_not_contains "DIFFERS from templates/pre-push"
+}
+
+test_pre_push_does_not_recommit_the_dashboard_under_an_absolute_data_path() {
+  _data_repo
+  printf '{"type":"gate","date":"2026-08-14","change":"c1","tier":"T1","gate":"G1","round":1,"commit":"aaa1111","outcome":"pass","findings":0,"note":"n"}\n' > "$REPO/pdata/ledger.jsonl"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "add ledger" >/dev/null 2>&1
+  _data_report
+  LAST_OUT="$(PIPELINE_DATA="$REPO/pdata" hook 2>&1)"; LAST_EXIT=$?
+  assert_exit 0
+  git -C "$REPO" log -1 --format=%s | grep -q "auto: regenerate dashboard.html" && _ok || _fail "the first push should commit the generated dashboard"
+  local i before after
+  for i in 1 2; do
+    printf 'note %s\n' "$i" > "$REPO/docs-note.txt"
+    git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "unrelated $i" >/dev/null 2>&1
+    _data_report
+    before="$(git -C "$REPO" rev-parse HEAD)"
+    PIPELINE_DATA="$REPO/pdata" hook >/dev/null 2>&1
+    after="$(git -C "$REPO" rev-parse HEAD)"
+    [ "$before" = "$after" ] && _ok || _fail "push $i recommitted the dashboard though nothing changed (absolute PIPELINE_DATA)"
+  done
+}
+
+# --- Claude Code hooks
+test_install_claude_hook_bakes_pipeline_data_into_both_commands() {
+  [ -n "$PY" ] || { _skip "no python — the installer refuses to hand-edit JSON"; return; }
+  _data_repo
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-claude-hook.sh ) >/dev/null 2>&1
+  local n; n="$(grep -c "PIPELINE_DATA='$REPO/pdata' bash" "$REPO/.claude/settings.json" 2>/dev/null)"
+  [ "${n:-0}" -eq 2 ] && _ok || _fail "expected both hook commands to carry PIPELINE_DATA, found ${n:-0}"
+}
+
+test_claude_hooks_say_so_when_pipeline_data_is_unusable() {
+  newrepo
+  _other_project
+  LAST_OUT="$(printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"}}' "$REPO/src/auth/existing.js" | ( cd "$REPO" && PIPELINE_DATA="$OTHER" bash .pipeline/tools/hooks/r0c-post-edit.sh ) 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "R0c must not stay silent when it cannot read a trusted surfaces file"
+  assert_contains "PIPELINE_DATA is not usable"
+  LAST_OUT="$(printf '{}' | ( cd "$REPO" && PIPELINE_DATA="$OTHER" bash .pipeline/tools/hooks/stop-compliance.sh ) 2>&1)"; LAST_EXIT=$?
+  assert_exit 0 "the Stop hook fails open"
+  assert_contains "systemMessage"
+  assert_contains "PIPELINE_DATA is not usable"
+}
+
+test_stop_hook_reads_the_data_directory_ledger() {
+  _data_repo
+  printf 'x\n' > "$REPO/src/auth/existing.js"; git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm c >/dev/null 2>&1
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" BASE="$BASE_SHA" CHANGE=c REASON=t bash .pipeline/tools/reconcile.sh T4 --log ) >/dev/null 2>&1
+  [ -f "$REPO/pdata/ledger.jsonl" ] && _ok || _fail "the route record did not land in the data directory"
+  [ -e "$REPO/.pipeline/ledger.jsonl" ] && _fail "the kit-side ledger was written too" || _ok
+  LAST_OUT="$(printf '{}' | ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" PIPELINE_STOP_MAX_ATTEMPTS=1 bash .pipeline/tools/hooks/stop-compliance.sh ) 2>&1)"; LAST_EXIT=$?
+  case "$LAST_OUT" in *'"decision":"block"'*) _ok;; *) _fail "a T4 route with no gate runs in pdata/ledger.jsonl must block the stop; got: $LAST_OUT";; esac
+}
+
+# --- gate agents
+test_gate_agents_have_explicit_tool_lists_and_none_can_write_by_name() {
+  local g f
+  for g in 1 2 3 4 5 6 7 8; do
+    f="$KIT/templates/agents/pipeline-gate-g$g.md"
+    grep -qE '^(tools|disallowedTools):' "$f" && _ok || _fail "g$g has neither tools: nor disallowedTools:, so it inherits every tool"
+    if grep -q '^tools:' "$f"; then
+      grep '^tools:' "$f" | grep -qE 'Edit|Write|NotebookEdit' && _fail "g$g grants a file-writing tool" || _ok
+    else
+      grep '^disallowedTools:' "$f" | grep -q 'Edit' && grep '^disallowedTools:' "$f" | grep -q 'Write' && _ok || _fail "g$g must disallow Edit and Write"
+    fi
+  done
 }
 
 test_c3_verify_refuses_unknown_options() {
