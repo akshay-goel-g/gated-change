@@ -454,10 +454,24 @@ fi
 # The data directory (PIPELINE_DATA) is excluded the same way: its ledger, dashboard and reports are written by the
 # pipeline, and a commit of them used to be tiered as project work (a `ledger` row in the shipped example made it T4).
 # Its project/ directory is the project's own and stays in.
+#
+# Only when the data directory is in THIS repository, like the kit exclusion above: with PIPELINE_DATA_EXTERNAL=1 it
+# can sit in another repo, and that repo's `src/` prefix must not swallow this repo's `src/auth` (it once tiered T0).
 _dp=""
-[ -z "${PIPELINE_DATA:-}" ] || _dp="$(git -C "$PIPELINE_DATA" rev-parse --show-prefix 2>/dev/null)"
+if [ -n "${PIPELINE_DATA:-}" ]; then
+  _repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+  _data_root="$(git -C "$PIPELINE_DATA" rev-parse --show-toplevel 2>/dev/null)"
+  if [ -n "$_data_root" ] && [ "$_data_root" = "$_repo_root" ]; then
+    _dp="$(git -C "$PIPELINE_DATA" rev-parse --show-prefix 2>/dev/null)"
+  fi
+fi
 if [ -n "$_dp" ] && [ "${INCLUDE_KIT:-0}" != "1" ]; then
+  _before=$(printf '%s\n' "$CHANGED" | sed '/^$/d' | wc -l | tr -d ' ')
   CHANGED=$(printf '%s\n' "$CHANGED" | awk -v p="$_dp" 'index($0, p) != 1 || index($0, p "project/") == 1')
+  _after=$(printf '%s\n' "$CHANGED" | sed '/^$/d' | wc -l | tr -d ' ')
+  _dropped=$((_before - _after))
+  [ "$_dropped" -gt 0 ] && \
+    echo "Note: $_dropped file(s) under ${_dp} excluded — the pipeline's data directory (PIPELINE_DATA), not the project. INCLUDE_KIT=1 to include." >&2
 fi
 
 # Routing your project against the KIT's own surfaces fails open, which is why

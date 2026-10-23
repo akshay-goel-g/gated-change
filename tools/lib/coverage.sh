@@ -249,6 +249,11 @@ coverage_kit_prefix() {
 # directory still is (coverage_scan keeps <prefix>project/ in, as it does for the kit).
 coverage_data_prefix() {
   [ -n "${PIPELINE_DATA:-}" ] || return 0
+  [ "${INCLUDE_KIT:-}" = 1 ] && return 0
+  # Only a data directory in THIS repository has a prefix that means anything here (reconcile.sh applies the same rule).
+  _cdp_repo="$(git rev-parse --show-toplevel 2>/dev/null)"
+  _cdp_data="$(git -C "$PIPELINE_DATA" rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$_cdp_data" ] && [ "$_cdp_data" = "$_cdp_repo" ] || return 0
   git -C "$PIPELINE_DATA" rev-parse --show-prefix 2>/dev/null || true
 }
 

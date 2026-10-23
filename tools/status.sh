@@ -594,7 +594,14 @@ if [ -f "$HOOKS_DIR/pre-push" ]; then
     say "      Only if it should match the template:"
     say "        bash $KIT/tools/install-hook.sh --force"
   else
-    say "  [x] pre-push hook installed"
+    # The data directory the hook enforces is baked into it (install-hook.sh); the comparison above blanks that line,
+    # so report it here, or status could not say which surfaces file a push is judged by.
+    _hook_data="$(sed -n 's/^PIPELINE_DATA="\${PIPELINE_DATA:-\(.*\)}"$/\1/p' "$HOOKS_DIR/pre-push" | head -n 1)"
+    if [ -n "$_hook_data" ]; then
+      say "  [x] pre-push hook installed (enforces the data directory $_hook_data)"
+    else
+      say "  [x] pre-push hook installed"
+    fi
   fi
 else
   say "  [ ] pre-push hook NOT installed   → bash $KIT/tools/install-hook.sh"

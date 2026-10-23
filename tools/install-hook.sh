@@ -68,6 +68,7 @@ trap 'rm -f "$RENDERED"' EXIT
 # The data directory is baked in the same way when one is set now (data_root_require above has vetted it): the hook
 # must enforce the surfaces file this installer just validated, not whatever the pusher's environment holds.
 DATA_BAKE="${PIPELINE_DATA:-}"
+DATA_BAKE="${DATA_BAKE%/}"   # `pdata/` and `pdata` are one directory; a second spelling must not look like a different hook
 sed -e "s|^PIPELINE_DIR=\"\${PIPELINE_DIR:-.pipeline}\"|PIPELINE_DIR=\"\${PIPELINE_DIR:-$PREFIX}\"|" \
     -e "s|^PIPELINE_DATA=\"\${PIPELINE_DATA:-}\"|PIPELINE_DATA=\"\${PIPELINE_DATA:-$DATA_BAKE}\"|" "$SRC" > "$RENDERED"
 

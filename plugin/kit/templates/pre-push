@@ -43,6 +43,9 @@ PIPELINE_DATA="${PIPELINE_DATA:-}"
 if [ -n "$PIPELINE_DATA" ]; then
   _dr_ok=0; _dr_n=0; _dr_p="${PIPELINE_DATA%/}"; _dr_top="$(git rev-parse --show-toplevel 2>/dev/null)"
   case "$PIPELINE_DATA" in /*|[A-Za-z]:/*) [ -d "$PIPELINE_DATA" ] && _dr_ok=1;; esac
+  # data-root.sh refuses these characters too: they cannot be baked into a hook or a settings.json command.
+  case "$PIPELINE_DATA" in *[\\\|\&\$\`\'\"]*|*"
+"*) _dr_ok=0;; esac
   if [ "$_dr_ok" = 1 ] && [ "${PIPELINE_DATA_EXTERNAL:-0}" != 1 ]; then
     _dr_ok=0
     while [ "$_dr_n" -lt 100 ]; do
@@ -59,6 +62,9 @@ if [ -n "$PIPELINE_DATA" ]; then
     echo "  set PIPELINE_DATA_EXTERNAL=1 if the data directory is meant to live outside the repository." >&2
     exit 1
   fi
+  # Export it: the dashboard.sh this hook runs would otherwise compute coverage from the KIT-side surfaces.conf and
+  # commit a coverage panel that disagrees with what this hook just enforced.
+  export PIPELINE_DATA
 fi
 DATA_DIR="${PIPELINE_DATA:-$PIPELINE_DIR}"
 SURFACES="${SURFACES:-$DATA_DIR/project/surfaces.conf}"

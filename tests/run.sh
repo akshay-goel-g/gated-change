@@ -9219,6 +9219,97 @@ test_stop_hook_reads_the_data_directory_ledger() {
   case "$LAST_OUT" in *'"decision":"block"'*) _ok;; *) _fail "a T4 route with no gate runs in pdata/ledger.jsonl must block the stop; got: $LAST_OUT";; esac
 }
 
+# --- Round 3 of the D1/D2/D5 gates (G4 found all three, reproduced)
+test_pre_push_exports_the_baked_data_directory_to_dashboard_sh() {
+  _data_repo
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-hook.sh ) >/dev/null 2>&1
+  printf '{"type":"gate","date":"2026-08-14","change":"c1","tier":"T1","gate":"G1","round":1,"commit":"aaa1111","outcome":"pass","findings":0,"note":"n"}\n' > "$REPO/pdata/ledger.jsonl"
+  # A stand-in that records the environment it was run in; it fails, which the hook only warns about.
+  printf '#!/bin/sh\nprintf "%%s" "${PIPELINE_DATA:-UNSET}" > "%s/seen-data"\nexit 1\n' "$REPO" > "$REPO/.pipeline/tools/dashboard.sh"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "stub dashboard" >/dev/null 2>&1
+  _data_report
+  # Nothing in the pusher's environment: only the value baked into the hook can tell dashboard.sh where the data lives.
+  ( cd "$REPO" && env -u PIPELINE_DATA BASE="$BASE_SHA" sh .git/hooks/pre-push ) >/dev/null 2>&1
+  [ "$(cat "$REPO/seen-data" 2>/dev/null)" = "$REPO/pdata" ] && _ok || _fail "dashboard.sh did not receive the baked PIPELINE_DATA (saw: $(cat "$REPO/seen-data" 2>/dev/null))"
+}
+
+test_reconcile_excludes_only_a_data_directory_in_this_repository() {
+  _data_repo
+  _other_project
+  git -C "$OTHER" init -q >/dev/null 2>&1
+  mkdir -p "$OTHER/src"; cp -r "$REPO/pdata/project" "$OTHER/src/project"
+  _t4_commit
+  # The foreign data directory's prefix is `src/`; it must not swallow this repository's src/auth.
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$OTHER/src" PIPELINE_DATA_EXTERNAL=1 BASE="$BASE_SHA" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "nothing to reconcile"
+  assert_not_contains "excluded — the pipeline's data directory"
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" BASE="$BASE_SHA" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_not_contains "excluded — the pipeline's data directory"
+  printf '{"type":"gate"}\n' > "$REPO/pdata/ledger.jsonl"
+  git -C "$REPO" add -A >/dev/null 2>&1; git -C "$REPO" commit -qm "ledger" >/dev/null 2>&1
+  local base; base="$(git -C "$REPO" rev-parse HEAD~1)"
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" BASE="$base" bash .pipeline/tools/reconcile.sh T0 2>&1)"; LAST_EXIT=$?
+  assert_contains "excluded — the pipeline's data directory"
+  # coverage.sh applies the same rule
+  local p
+  p="$(cd "$REPO" && PIPELINE_DATA="$OTHER/src" PIPELINE_DATA_EXTERNAL=1 bash -c '. "$1/tools/lib/coverage.sh"; coverage_data_prefix' _ "$KIT")"
+  [ -z "$p" ] && _ok || _fail "coverage_data_prefix returned '$p' for a data directory in another repository"
+  p="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash -c '. "$1/tools/lib/coverage.sh"; coverage_data_prefix' _ "$KIT")"
+  [ "$p" = "pdata/" ] && _ok || _fail "coverage_data_prefix returned '$p' for a data directory in this repository"
+}
+
+test_install_claude_hook_refuses_a_rerun_with_a_different_pipeline_data() {
+  [ -n "$PY" ] || { _skip "no python — the installer refuses to hand-edit JSON"; return; }
+  _data_repo
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-claude-hook.sh ) >/dev/null 2>&1
+  LAST_OUT="$(cd "$REPO" && env -u PIPELINE_DATA bash .pipeline/tools/install-claude-hook.sh 2>&1)"; LAST_EXIT=$?
+  assert_exit 2 "a re-run without PIPELINE_DATA must not add a second, unprefixed entry"
+  assert_contains "different PIPELINE_DATA"
+  local n; n="$(grep -c "r0c-post-edit" "$REPO/.claude/settings.json" 2>/dev/null)"
+  [ "${n:-0}" -eq 1 ] && _ok || _fail "expected one r0c entry, found ${n:-0}"
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-claude-hook.sh 2>&1)"; LAST_EXIT=$?
+  assert_exit 0 "the same PIPELINE_DATA again stays idempotent"
+}
+
+test_install_hook_normalises_a_trailing_slash_and_status_reports_the_baked_directory() {
+  _data_repo
+  ( cd "$REPO" && PIPELINE_DATA="$REPO/pdata" bash .pipeline/tools/install-hook.sh ) >/dev/null 2>&1
+  LAST_OUT="$(cd "$REPO" && PIPELINE_DATA="$REPO/pdata/" bash .pipeline/tools/install-hook.sh 2>&1)"; LAST_EXIT=$?
+  assert_exit 0 "a trailing slash is the same directory"
+  assert_contains "Already installed and identical"
+  LAST_OUT="$(cd "$REPO" && env -u PIPELINE_DATA bash .pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "enforces the data directory $REPO/pdata"
+}
+
+test_pre_push_inline_check_refuses_the_characters_data_root_sh_refuses() {
+  _data_repo
+  local bad d
+  for bad in 'pd$x' "pd'x" 'pd"x' 'pd`x' 'pd&x' 'pd|x'; do
+    d="$REPO/$bad"; mkdir -p "$d"
+    ( cd "$REPO" && KIT="$KIT" PIPELINE_DATA="$d" bash -c '. "$KIT/tools/lib/data-root.sh"; data_root_check "$PIPELINE_DATA"' ) >/dev/null 2>&1 && _fail "data-root.sh accepted $bad" || _ok
+    LAST_OUT="$(PIPELINE_DATA="$d" hook 2>&1)"; LAST_EXIT=$?
+    assert_exit 1 "the pre-push inline copy must refuse $bad as data-root.sh does"
+    assert_contains "BLOCKED: PIPELINE_DATA"
+  done
+}
+
+test_ledger_and_status_agree_on_the_ledger_from_the_same_cwd_with_pipeline_data_unset() {
+  newrepo
+  mkdir -p "$REPO/src/deep"
+  ( cd "$REPO/src/deep" && env -u PIPELINE_DATA bash ../../.pipeline/tools/ledger.sh add --change agree --gate G4 --tier T1 --outcome pass --model m --confidence fresh --evidence .pipeline/tools/ledger.sh:1 ) >/dev/null 2>&1
+  [ -f "$REPO/.pipeline/ledger.jsonl" ] && _ok || _fail "ledger.sh wrote somewhere other than the kit's ledger from a subdirectory"
+  [ -e "$REPO/src/deep/.pipeline" ] && _fail "a stray .pipeline appeared under the caller's cwd" || _ok
+  LAST_OUT="$(cd "$REPO/src/deep" && env -u PIPELINE_DATA bash ../../.pipeline/tools/status.sh 2>&1)"; LAST_EXIT=$?
+  assert_contains "LAST GATE"
+  assert_contains "agree"
+}
+
+test_the_kits_own_surfaces_route_data_root_sh_as_t4() {
+  local rx
+  rx="$(awk -F'::' '$1=="T4" && $2 ~ /data-root/ {print $2}' "$KIT/project/surfaces.conf")"
+  [ -n "$rx" ] && printf 'tools/lib/data-root.sh\n.pipeline/tools/lib/data-root.sh\n' | grep -qE "$rx" && _ok || _fail "tools/lib/data-root.sh matches no T4 row in project/surfaces.conf"
+}
+
 # --- gate agents
 test_gate_agents_have_explicit_tool_lists_and_none_can_write_by_name() {
   local g f

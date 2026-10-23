@@ -112,7 +112,7 @@ mkdir -p "$SETTINGS_DIR"
 # or PARSE_ERROR:<why>. The PostToolUse entry (R0c) and the Stop entry (stop-compliance.sh) share it.
 merge_hook() {
 "$PY" - "$SETTINGS" "$1" "$2" "$3" "$4" <<'PYEOF'
-import json, sys
+import json, re, sys
 
 path, event, matcher, command, timeout = sys.argv[1:6]
 
@@ -150,6 +150,22 @@ if already:
     print("ALREADY_PRESENT")
     sys.exit(0)
 
+# The same hook installed with a different (or no) PIPELINE_DATA prefix is not a second hook to add: two entries would
+# run the script twice, one of them against the wrong data directory. Say so instead, as install-hook.sh does.
+def bare(c):
+    return re.sub(r"^PIPELINE_DATA='[^']*' ", "", c) if isinstance(c, str) else None
+
+if any(
+    isinstance(entry, dict)
+    and any(
+        isinstance(h, dict) and bare(h.get("command")) == bare(command)
+        for h in entry.get("hooks", [])
+    )
+    for entry in post
+):
+    print("PREFIX_DIFFERS")
+    sys.exit(0)
+
 entry_hook = {"type": "command", "command": command}
 if timeout:
     entry_hook["timeout"] = int(timeout)
@@ -177,6 +193,12 @@ if [ "$STATUS" -ne 0 ]; then
 fi
 
 case "$RESULT" in
+  PREFIX_DIFFERS)
+    echo "REFUSED: $SETTINGS already runs this hook with a different PIPELINE_DATA (or none)." >&2
+    echo "  Adding a second entry would run it twice, once against the wrong data directory. Re-run with the" >&2
+    echo "  PIPELINE_DATA it was installed with, or remove the old entry from $SETTINGS first." >&2
+    exit 2
+    ;;
   ALREADY_PRESENT)
     echo "Already installed: $SETTINGS already runs this exact hook on PostToolUse."
     ;;
@@ -202,6 +224,9 @@ if [ -f "$STOP_SCRIPT" ]; then
   STOP_COMMAND="${DATA_PREFIX}bash \"\$CLAUDE_PROJECT_DIR/$STOP_REL\""
   STOP_RESULT="$(merge_hook Stop "" "$STOP_COMMAND" 180)"
   case "$STOP_RESULT" in
+    PREFIX_DIFFERS)
+      echo "REFUSED: the Stop hook in $SETTINGS has a different PIPELINE_DATA (or none); remove it or re-run with the same one." >&2
+      exit 2 ;;
     ALREADY_PRESENT) echo "Stop hook already installed in $SETTINGS." ;;
     INSTALLED)
       echo

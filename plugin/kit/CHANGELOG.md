@@ -44,6 +44,17 @@ redesigns, recorded in `ledger.jsonl`.
   `multi-surface-d1-d2-d5`), which also made G2, G3 and G8 agent tool lists explicit and fixed the dashboard's
   cwd-relative defaults and the pre-push dashboard comparison under an absolute data path.
 
+  Round 3 of that gate: the pre-push hook now exports its baked `PIPELINE_DATA` to the `dashboard.sh` it runs (it
+  committed a coverage panel from the kit-side surfaces before); the data directory is excluded from tiering only when
+  it is inside this repository (a foreign `PIPELINE_DATA_EXTERNAL=1` directory's `src/` prefix once swallowed this
+  repo's `src/auth`), and reconcile says so in a Note; `install-claude-hook.sh` refuses a re-run with a different
+  `PIPELINE_DATA` instead of adding a second entry; `status.sh` reports the data directory baked into the hook; a
+  trailing slash no longer makes `install-hook.sh` see a different hook; the hook's inline check refuses the same
+  characters as `data-root.sh`. **Narrowed, not widened:** the gate agents are no longer all "read-only". Only G1 and G3
+  are; G2, G4-G7 carry a `tools:` list that includes Bash or the web tools, and G8 uses a `disallowedTools` denylist,
+  which grants every tool not named, including any added to Claude Code later. Model IDs in `project/models.conf` are
+  kept in one place with a "checked <date>" each, but whether they are current cannot be verified offline.
+
 - **Gate subagents and a model map (ACTION-PLAN D1, D2).** `templates/agents/pipeline-gate-g1..g8.md`
   (also in `.claude/agents/` for the kit itself): one Claude Code subagent per gate with `omitClaudeMd`,
   a tool list per gate, the model of its tier, and the card's own `withhold:` line. `project/models.conf`
