@@ -1297,12 +1297,11 @@ tests/run.sh             the kit's own suite — `bash tests/run.sh`. No depende
 tests/stop-hook-e2e.sh   the Claude Code Stop hook and its installer wiring — `bash tests/stop-hook-e2e.sh`
 tests/plugin-e2e.sh      installs the Claude Code plugin into scratch repos for every example project type — `bash tests/plugin-e2e.sh`, about two minutes
 tests/plugin-agent-e2e.sh  has a real Claude Code agent follow the install skill in scratch repos (asks before writing, honours a no) — needs `claude`, calls the model, costs a few cents
-experiments/             benchmark results land here
 ```
 
-This repo is also **the kit's own development repo**, so it carries its own `project/`,
-`ledger.jsonl`, `security-reports/` and `specs/` — the evidence that it runs its own pipeline.
-They are not part of an install; step 1 strips them.
+This repo is also **the kit's own development repo**, so it carries its own `project/`. The kit's gate ledger,
+security reports and specs are kept in a private repository, not published here; the figures below were taken
+from that ledger. `project/` is not part of an install; step 1 strips it.
 
 **Where to read next:** `core/00-start.md` (adoption path) → `core/01-router.md` (tiers and
 the matrix) → the card for whichever gate you are about to run.
@@ -1317,10 +1316,10 @@ Each claim below is paired with the evidence for it:
 |---|---|
 | The universal couplings are real failure modes | Widely documented, low controversy |
 | The mining method finds real couplings | **Verify on your own repo — that is step 2** |
-| The gates and tiers surface real defects before push | **Shown in this repo's ledger:** 214 blocking findings across 481 gate runs ([numbers and limits](docs/evidence.md)) |
+| The gates and tiers surface real defects before push | **Shown in the kit's own ledger (kept private):** 214 blocking findings across 481 gate runs ([numbers and limits](docs/evidence.md)) |
 | Fewer defects reach users | **Not yet measured.** There is no control group; `tools/benchmark/` runs the comparison on your own repo |
 | Routing costs less than reviewing everything | **Cost per gate is measured; the comparison against running every gate has not been run yet** |
-| The kit runs its own pipeline | **Since 2026-08-12.** `ledger.jsonl` is the evidence — 481 gate runs across 50 changes as of 2026-10-15 ([numbers and limits](docs/evidence.md)) |
+| The kit runs its own pipeline | **Since 2026-08-12.** The kit's own ledger (kept private) is the evidence — 481 gate runs across 50 changes as of 2026-10-15 ([numbers and limits](docs/evidence.md)) |
 | The kit has shipped real projects | **Yes: nine.** One is public — [Focus Guard on the Chrome Web Store](https://chromewebstore.google.com/detail/focus-guard-%E2%80%94-website-blo/blbbadphbklfpllimmcnhjcacdicmnge) — and eight are private. Use is shown; effect on defects or effort is not (rows above) |
 | The tools do what this README says | `bash tests/run.sh` (in the kit's own repo; step 1 strips `tests/` from an install) — 1380 checks passed on 2026-10-15, no dependencies |
 

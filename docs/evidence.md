@@ -1,7 +1,7 @@
 # Evidence so far
 
 What the kit's own ledger shows, and, as important, what it cannot show. Every number here
-comes from `ledger.jsonl` in this repository, read with `bash tools/ledger.sh report`, as of
+comes from the kit's own `ledger.jsonl` (kept in a private repository, not published here), read with `bash tools/ledger.sh report`, as of
 **2026-10-15**. Re-run the report before quoting any of them. They are self-reported by one
 author on one project.
 
@@ -55,7 +55,7 @@ recorded, and neither as proof that defects went down.
 - **Gate overrides happened.** The threat gate was skipped 20 times out of 102 runs, several
   of them while the gate itself was being built. That is published here on purpose.
 - **The sample is one project, built by the people who built the kit.** The paired
-  experiments in `experiments/` are four unblinded pairs on one codebase.
+  experiments (records kept private) are four unblinded pairs on one codebase.
 
 ## How to find out for your own project
 

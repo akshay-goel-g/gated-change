@@ -54,7 +54,8 @@ jobs:
 
       - name: Ledger chain
         shell: bash
-        run: bash tools/ledger.sh verify --allow-joins
+        run: |
+          if [ -f ledger.jsonl ]; then bash tools/ledger.sh verify --allow-joins; else echo "no ledger.jsonl in this tree (kept in the private repo): skipping"; fi
 
       - name: Stop-hook tests
         shell: bash

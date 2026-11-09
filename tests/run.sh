@@ -4232,6 +4232,51 @@ _r9_xcheck() {   # $1 = change, $2 = tier; asserts compliance and the dashboard 
   done
 }
 
+# dashboard.sh escapes ledger rows in-process (json_escape_to) instead of through a sed|awk pipeline,
+# because the pipeline cost several processes per row and made a push take minutes on Windows. The two
+# must give the same bytes. The functions are cut out of dashboard.sh (it cannot be sourced: it runs on
+# load) and compared with the original pipeline on hostile input.
+test_dashboard_json_escape_matches_the_original_pipeline() {
+  # From json_escape_to's first line to the second line that is just "}" (the end of json_escape).
+  local fn; fn="$(awk '/^json_escape_to\(\) \{/{f=1} f{print} f&&/^}$/{n++; if(n==2) exit}' "$KIT/tools/dashboard.sh")"
+  [ -n "$fn" ] && _ok || { _fail "could not cut json_escape out of dashboard.sh"; return; }
+  eval "$fn" || { _fail "the json_escape cut from dashboard.sh does not parse"; return; }
+  _orig() { printf '%s' "$1" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
+    | awk 'NR>1 { printf "\\n" } { printf "%s", $0 }'; }
+  # Built one at a time: on Git Bash a $'..' word inside an array literal loses its carriage return.
+  local cases=( 'plain' '' 'a"b\c' '\\' '"' '</script><!--' 'a\"b' '{"type":"gate","note":"x \"q\" \\ y"}' )
+  local _cr=$'\r' _tab=$'\t' _nl=$'\n'
+  cases+=( "tab${_tab}here" "cr${_cr}here" "one${_nl}two" "trail${_nl}" "a${_cr}${_nl}\"b\"\\" )
+  local c got want
+  for c in "${cases[@]}"; do
+    got="$(json_escape "$c")"; want="$(_orig "$c")"
+    [ "$got" = "$want" ] && _ok || _fail "json_escape differs on $(printf '%q' "$c"): got [$got] want [$want]"
+  done
+  # json_escape_to is the single-line fast path the ledger loop uses directly.
+  local v
+  for c in 'plain' 'a"b\c' "tab${_tab}here" "cr${_cr}here" '</script>'; do
+    json_escape_to v "$c"; want="$(_orig "$c")"
+    [ "$v" = "$want" ] && _ok || _fail "json_escape_to differs on $(printf '%q' "$c")"
+  done
+}
+
+# The ledger-row loop in dashboard.sh (skip blank rows, join with commas, keep a last row that has no
+# newline) is the other half of the speed-up, and a break there is silent: the page just shows fewer rows or
+# none. Mutations of the comma join, the `|| [ -n "$line" ]` tail and the blank skip all survived every other test.
+test_dashboard_ledger_loop_keeps_every_row_and_skips_blank_ones() {
+  command -v node >/dev/null 2>&1 || { _skip "no node to parse the embedded lines array"; return; }
+  newrepo
+  printf '%s\n' '{"type":"route","change":"a"}' '' '   ' '{"type":"route","change":"b \"q\""}' > "$REPO/l.jsonl"
+  printf '\r\n' >> "$REPO/l.jsonl"                           # a CR-only row: whitespace, skipped
+  printf '{"type":"route","change":"c"}' >> "$REPO/l.jsonl"    # last row, no trailing newline
+  run bash -c "cd '$REPO' && bash .pipeline/tools/dashboard.sh --ledger l.jsonl --out o.html"
+  assert_exit 0 "dashboard.sh on a ledger with blank rows"
+  local got
+  got="$(cd "$REPO" && grep -o '"lines":\[[^]]*\]' o.html | head -1 | sed 's/^"lines"://' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s);console.log(a.length+"|"+a.map(x=>JSON.parse(x).change).join(","))})' 2>&1)"
+  [ "$got" = '3|a,b "q",c' ] && _ok || _fail "the embedded lines array is wrong: [$got] (want 3 rows: a, b \"q\", c)"
+}
+
 test_dashboard_and_compliance_agree_after_a_lineage_restart() {
   newrepo
   led route --change x --predicted T2 --actual T2 --round 1 --reason r --base "$BASE_SHA" >/dev/null 2>&1

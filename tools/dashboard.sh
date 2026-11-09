@@ -415,10 +415,28 @@ done
 
 WARN_JSON=$(printf '%s' "$WARNINGS" | awk 'BEGIN{first=1;printf "["} NF{gsub(/\\/,"");gsub(/"/,"\\\"");printf "%s\"%s\"",(first?"":","),$0;first=0} END{printf "]"}')
 
-# Mirrors tools/ledger.sh's json_escape() exactly, same idiom, same reason:
-# a note is long agent-written prose that quotes real code, and an unescaped
-# " or \ is not hypothetical here either.
+# Escapes backslash, double quote, tab, CR and (multi-line input) newline: a note is long
+# agent-written prose that quotes real code, and an unescaped " or \ is not hypothetical here.
+# tests/run.sh pins this function to the sed|awk pipeline it replaced. It is NOT byte-identical
+# to tools/ledger.sh's json_escape(), which also escapes every other control byte below 0x20 as
+# \u00XX; the dashboard has never done that.
+#
+# json_escape_to VAR VALUE sets VAR to the escaped single-line VALUE with bash's own substitutions, in
+# this shell: the sed|awk pipeline below costs several processes per call, which on Windows made
+# regenerating the dashboard take minutes for a ledger of a few hundred rows. A VALUE containing a newline
+# must go through json_escape instead.
+json_escape_to() {
+  local _s="$2"
+  _s=${_s//\\/\\\\}; _s=${_s//\"/\\\"}; _s=${_s//$'\t'/\\t}; _s=${_s//$'\r'/\\r}
+  printf -v "$1" '%s' "$_s"
+}
 json_escape() {
+  if [[ "$1" != *$'\n'* ]]; then
+    local _je_out
+    json_escape_to _je_out "$1"
+    printf '%s' "$_je_out"
+    return
+  fi
   printf '%s' "$1" \
     | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
     | awk 'NR>1 { printf "\\n" } { printf "%s", $0 }'
@@ -748,8 +766,11 @@ for path in "${LEDGERS[@]}"; do
   lines_json=""
   first_ln=1
   while IFS= read -r line || [ -n "$line" ]; do
-    [ -n "$(printf '%s' "$line" | tr -d '[:space:]')" ] || continue
-    lines_json="${lines_json}$([ "$first_ln" -eq 1 ] || printf ',')\"$(json_escape "$line")\""
+    [[ "$line" =~ [^[:space:]] ]] || continue
+    # A row from `read -r` has no newline, so the in-process escape applies; no subshell per row.
+    json_escape_to _je "$line"
+    [ "$first_ln" -eq 1 ] || lines_json+=","
+    lines_json+="\"${_je}\""
     first_ln=0
   done < "$path"
   SOURCE_JSON+=("{\"path\":\"$(json_escape "$shown")\",\"project\":\"$(json_escape "$proj")\",\"lines\":[${lines_json}]}")
