@@ -4237,8 +4237,8 @@ _r9_xcheck() {   # $1 = change, $2 = tier; asserts compliance and the dashboard 
 # must give the same bytes. The functions are cut out of dashboard.sh (it cannot be sourced: it runs on
 # load) and compared with the original pipeline on hostile input.
 test_dashboard_json_escape_matches_the_original_pipeline() {
-  # From json_escape_to's first line to the second line that is just "}" (the end of json_escape).
-  local fn; fn="$(awk '/^json_escape_to\(\) \{/{f=1} f{print} f&&/^}$/{n++; if(n==2) exit}' "$KIT/tools/dashboard.sh")"
+  # From _json_escape_pipeline's first line to the third line that is just "}" (the end of json_escape).
+  local fn; fn="$(awk '/^_json_escape_pipeline\(\) \{/{f=1} f{print} f&&/^}$/{n++; if(n==3) exit}' "$KIT/tools/dashboard.sh")"
   [ -n "$fn" ] && _ok || { _fail "could not cut json_escape out of dashboard.sh"; return; }
   eval "$fn" || { _fail "the json_escape cut from dashboard.sh does not parse"; return; }
   _orig() { printf '%s' "$1" \
@@ -4252,6 +4252,17 @@ test_dashboard_json_escape_matches_the_original_pipeline() {
   for c in "${cases[@]}"; do
     got="$(json_escape "$c")"; want="$(_orig "$c")"
     [ "$got" = "$want" ] && _ok || _fail "json_escape differs on $(printf '%q' "$c"): got [$got] want [$want]"
+  done
+  # Long rows switch to the linear pipeline above 4096 bytes: compare around that boundary, on rows
+  # made of the characters that need escaping (the case where the in-process path is quadratic).
+  local n pad
+  for n in 4095 4096 4097 9000; do
+    pad="$(printf '%*s' "$n" '' | tr ' ' '\\')"
+    got="$(json_escape "$pad")"; want="$(_orig "$pad")"
+    [ "$got" = "$want" ] && _ok || _fail "json_escape differs on a row of $n backslashes"
+    pad="x\"${pad:3}\"${_tab}y"
+    json_escape_to v "$pad"; want="$(_orig "$pad")"
+    [ "$v" = "$want" ] && _ok || _fail "json_escape_to differs on a mixed row of about $n bytes"
   done
   # json_escape_to is the single-line fast path the ledger loop uses directly.
   local v

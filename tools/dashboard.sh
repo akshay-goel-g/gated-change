@@ -423,10 +423,21 @@ WARN_JSON=$(printf '%s' "$WARNINGS" | awk 'BEGIN{first=1;printf "["} NF{gsub(/\\
 #
 # json_escape_to VAR VALUE sets VAR to the escaped single-line VALUE with bash's own substitutions, in
 # this shell: the sed|awk pipeline below costs several processes per call, which on Windows made
-# regenerating the dashboard take minutes for a ledger of a few hundred rows. A VALUE containing a newline
-# must go through json_escape instead.
+# regenerating the dashboard take minutes for a ledger of a few hundred rows. bash's substitutions are
+# quadratic in the length of a pathological value (a note has no length cap), so a value longer than 4096
+# bytes goes through the pipeline instead, which is linear. A VALUE containing a newline must go through
+# json_escape instead.
+_json_escape_pipeline() {
+  printf '%s' "$1" \
+    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
+    | awk 'NR>1 { printf "\\n" } { printf "%s", $0 }'
+}
 json_escape_to() {
   local _s="$2"
+  if [ "${#_s}" -gt 4096 ]; then
+    printf -v "$1" '%s' "$(_json_escape_pipeline "$_s")"
+    return
+  fi
   _s=${_s//\\/\\\\}; _s=${_s//\"/\\\"}; _s=${_s//$'\t'/\\t}; _s=${_s//$'\r'/\\r}
   printf -v "$1" '%s' "$_s"
 }
@@ -437,9 +448,7 @@ json_escape() {
     printf '%s' "$_je_out"
     return
   fi
-  printf '%s' "$1" \
-    | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g' \
-    | awk 'NR>1 { printf "\\n" } { printf "%s", $0 }'
+  _json_escape_pipeline "$1"
 }
 
 # The path to reach file $1 FROM directory $2, both taken relative to the
