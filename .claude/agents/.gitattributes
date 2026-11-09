@@ -1,0 +1,3 @@
+# Same reason as templates/.gitattributes: a Windows checkout with core.autocrlf=true must not turn these into CRLF,
+# and tests/run.sh requires them to equal templates/agents byte for byte.
+*.md text eol=lf

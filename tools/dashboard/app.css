@@ -1,0 +1,340 @@
+:root{
+  --bg:#f6f7f9; --panel:#ffffff; --border:#dde1e6; --text:#1b1f24; --muted:#6b7280;
+  --accent:#2563eb; --pass:#16a34a; --fail:#dc2626; --warn:#d97706; --skip:#9ca3af;
+  --mono:ui-monospace,Consolas,"SF Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#0f1216; --panel:#171b21; --border:#2a2f37; --text:#e6e9ef; --muted:#8b94a3;
+         --accent:#5b9dff; --pass:#3ecf6a; --fail:#f0605a; --warn:#e8a33d; --skip:#5a6270; }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans)}
+body{display:flex;flex-direction:column;overflow:hidden}
+/* The section labels are real headings now (P2-6). Each of these classes
+   already carries its own look; this only unwinds the UA <h2> defaults (1.5em,
+   bold, block margins) back to what they rendered as <div>s. :where() keeps the
+   selector at element specificity, so it overrides nothing a class sets —
+   .rail-project-name's 700, .coverage .cov-head's 600, .section-title's 11px
+   all still win. G3 Craft round 1 caught the leak an incomplete reset left:
+   .cov-head (no font-size of its own) rendered the coverage line at 18px,
+   larger than the page's own <h1>. `#drawer h2` re-states its own size/weight.*/
+h2:where(.section-title,.cov-head,.rail-metrics-head,.rail-project-name){margin:0;font-size:inherit;font-weight:400}
+/* the fleet-view "Projects" label sits outside .overview, so no class rule
+   gives it a size — pin it to the section-label look explicitly */
+.projects-overview>.section-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+
+header{padding:10px 16px;border-bottom:1px solid var(--border);background:var(--panel);
+  display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+header h1{font-size:15px;margin:0;font-weight:600}
+header .meta{font-size:12px;color:var(--muted)}
+header .warn-pill{font-size:11px;color:var(--warn);border:1px solid var(--warn);border-radius:10px;padding:1px 8px;cursor:pointer}
+header .live-pill{font-size:11px;border-radius:10px;padding:1px 8px;color:var(--muted);border:1px solid var(--border)}
+header .live-pill.live{color:var(--pass);border-color:var(--pass)}
+header .live-pill.degraded{color:var(--warn);border-color:var(--warn)}
+/* P1-8 — the generated-at stamp escalates as it ages; a stale snapshot is a
+   page that cannot be trusted, and it used to look identical to a fresh one. */
+#gen-time.stale{color:var(--warn);font-weight:600}
+#gen-time.stale-bad{color:var(--fail);font-weight:600}
+
+#body{flex:1;display:flex;min-height:0}
+#rail{width:340px;border-right:1px solid var(--border);overflow-y:auto;background:var(--panel);flex:0 0 auto}
+#rail .drop{margin:10px;padding:10px;border:1px dashed var(--border);border-radius:6px;font-size:11px;color:var(--muted);text-align:center}
+#rail .drop.over{border-color:var(--accent);color:var(--accent)}
+
+/* P2-8 — the rail filter box. A plain bordered search input in the rail head. */
+.rail-search-wrap{padding:8px 10px 2px}
+.rail-search{width:100%;box-sizing:border-box;font-family:var(--sans);font-size:12px;
+  padding:5px 8px;border:1px solid var(--border);border-radius:6px;
+  background:var(--bg);color:var(--text)}
+.rail-search::placeholder{color:var(--muted)}
+.rail-search:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+/* P2-8 — "show all N changes" below the default cap; a full-width text button. */
+.rail-more{display:block;width:calc(100% - 20px);margin:6px 10px;padding:6px 8px;
+  font-family:var(--sans);font-size:11px;cursor:pointer;text-align:center;
+  border:1px solid var(--border);border-radius:6px;background:var(--panel);color:var(--accent)}
+.rail-more:hover{border-color:var(--accent)}
+.rail-more .rail-more-n{color:var(--muted)}
+.rail-more:focus-visible,.rail-clear:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.rail-clear{font-family:var(--sans);font-size:11px;cursor:pointer;margin-left:6px;
+  border:1px solid var(--border);background:var(--panel);color:var(--accent);border-radius:10px;padding:1px 8px}
+.rail-clear:hover{border-color:var(--accent)}
+
+/* P1-2 — the page-level summary bar. Each segment is a rail filter. */
+.rail-summary{display:flex;flex-wrap:wrap;gap:4px;padding:8px 10px 6px}
+.rail-summary .seg{font-family:var(--sans);font-size:11px;cursor:pointer;
+  border:1px solid var(--border);background:var(--panel);color:var(--muted);
+  border-radius:10px;padding:2px 8px;line-height:1.4}
+.rail-summary .seg:hover{border-color:var(--accent);color:var(--text)}
+.rail-summary .seg.active{border-color:var(--accent);color:var(--accent);font-weight:600;
+  background:color-mix(in srgb, var(--accent) 12%, transparent)}
+.rail-summary .seg.fail.active{border-color:var(--fail);color:var(--fail);
+  background:color-mix(in srgb, var(--fail) 12%, transparent)}
+.rail-summary .seg.warn.active{border-color:var(--warn);color:var(--warn);
+  background:color-mix(in srgb, var(--warn) 12%, transparent)}
+/* P1-1 — the leading-metrics panel, in the rail for a single-project install. */
+.rail-metrics{padding:2px 12px 8px;border-bottom:1px solid var(--border);
+  display:flex;flex-direction:column;gap:2px}
+.rail-metrics-head{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.04em;margin-bottom:2px}
+.rail-empty-filter{padding:10px 12px;font-size:11px;color:var(--muted)}
+/* the empty-filter row's action is a .rail-clear button (styled above) since
+   P2-8 — the old inline .seg pill rule here is dead (G3 Craft). */
+/* P1-3 — a change whose defect was found after review. */
+.escape-badge{display:inline-block;margin-left:6px;font-size:10px;font-weight:700;
+  color:var(--fail);border:1px solid var(--fail);border-radius:8px;padding:0 5px;
+  text-transform:none;letter-spacing:0;vertical-align:middle}
+#center{flex:1;overflow:auto;position:relative}
+#graphwrap{padding:20px}
+#drawer{width:0;border-left:1px solid var(--border);overflow-y:auto;background:var(--panel);
+  transition:width .15s ease;flex:0 0 auto}
+#drawer.open{width:420px}
+/* No hard width — the inner fills the panel and reflows when the vertical
+   scrollbar appears. A fixed 420px here clipped ~16px of every line once the
+   drawer scrolled (P2-2, the 2026-09-01 review). */
+#drawer .inner{padding:16px}
+
+.change-group{border-bottom:1px solid var(--border)}
+.change-head{padding:8px 12px 2px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+/* A branch-named group with no gates — a stray reconcile, not a change (P1-5).
+   Muted, not selectable, no verdict row. */
+.change-group.routing-artifact{opacity:.6}
+.change-group.routing-artifact .change-head{text-transform:none;letter-spacing:0}
+.artifact-note{padding:2px 12px 10px;font-size:11px;color:var(--muted);line-height:1.45}
+.artifact-note code{font-family:var(--mono);font-size:10.5px}
+.exec-row{padding:8px 12px;cursor:pointer;border-left:3px solid transparent;font-size:12px}
+.exec-row:hover{background:var(--bg)}
+.exec-row.selected{background:var(--bg);border-left-color:var(--accent)}
+.exec-row .top{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.exec-row .round{color:var(--muted);font-size:11px}
+.exec-row .exec-date{color:var(--text);font-size:11px;margin-top:3px}
+.verdict-pill{font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;display:inline-block}
+.verdict-pill.pass{background:color-mix(in srgb, var(--pass) 16%, transparent);color:var(--pass)}
+.verdict-pill.fail{background:color-mix(in srgb, var(--fail) 16%, transparent);color:var(--fail)}
+.verdict-pill.warn{background:color-mix(in srgb, var(--warn) 16%, transparent);color:var(--warn)}
+
+.tabbar{display:flex;gap:2px;padding:14px 20px 0;border-bottom:1px solid var(--border);background:var(--panel)}
+.tab{border:none;background:transparent;padding:9px 16px;font-size:13px;color:var(--muted);cursor:pointer;
+  border-bottom:2px solid transparent;font-family:var(--sans)}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+#tabcontent{padding:20px}
+
+.overview{max-width:720px}
+.hero{display:flex;align-items:center;gap:10px;padding:14px 18px;border-radius:10px;margin-bottom:18px;font-size:17px;font-weight:600}
+.hero.pass{background:color-mix(in srgb, var(--pass) 12%, var(--panel));color:var(--pass)}
+.hero.fail{background:color-mix(in srgb, var(--fail) 12%, var(--panel));color:var(--fail)}
+.hero.warn{background:color-mix(in srgb, var(--warn) 12%, var(--panel));color:var(--warn)}
+.hero-icon{font-size:22px}
+
+.overview .section{margin-bottom:20px}
+.overview .section-title{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px}
+.overview .lead{font-size:14px;line-height:1.5;margin:0 0 6px}
+.overview .lead.warn-text{color:var(--warn)}
+.overview .muted{font-size:12.5px;color:var(--muted);margin:0}
+
+/* P1-3 — escape and assumption records on the Overview tab. */
+.overview .escape-section{border:1px solid var(--fail);border-radius:8px;padding:12px 14px;
+  background:color-mix(in srgb, var(--fail) 7%, var(--panel))}
+.overview .escape-section .section-title{color:var(--fail)}
+.overview .record-list{margin:4px 0 0;padding-left:18px;font-size:12.5px;line-height:1.5}
+.overview .record-list li{margin-bottom:4px}
+.overview .record-list li.record-warn{color:var(--warn)}
+.overview .record-note{margin-top:3px;font-size:12px;color:var(--muted);line-height:1.5}
+
+.reviewers{display:flex;flex-direction:column;gap:2px}
+.reviewer-row{display:flex;align-items:baseline;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.reviewer-row:last-child{border-bottom:none}
+.reviewer-icon{font-size:14px}
+.reviewer-text{font-size:13px;flex:1;min-width:200px}
+.reviewer-persona{font-weight:600}
+
+details{margin-top:2px}
+details summary{font-size:11.5px;color:var(--accent);cursor:pointer;list-style:none}
+details summary::-webkit-details-marker{display:none}
+/* Just the disclosure triangle — the summary's own text says what it opens. The
+   old "Show details ▸ " / "Hide details ▾ " prefix read doubled where two
+   summaries sit side by side, e.g. the reviewer rows (P2-3, the 2026-09-01
+   review). */
+details summary::before{content:"▸ ";}
+details[open] summary::before{content:"▾ "}
+/* and those adjacent reviewer-row disclosures stack rather than run together */
+.reviewer-row details{flex-basis:100%}
+.detail-body{font-size:11.5px;color:var(--muted);line-height:1.55;margin-top:6px;padding:8px 10px;
+  background:var(--bg);border-radius:6px;font-family:var(--mono);white-space:pre-wrap;word-break:break-word}
+
+svg text{font-family:var(--sans);fill:var(--text)}
+.state-box{fill:var(--panel);stroke:var(--border);stroke-width:1.5}
+.state-box.pass{stroke:var(--pass)}
+.state-box.pass.low{fill:url(#hatch-pass)}
+.state-box.pass.stale{stroke-dasharray:6 3}
+.state-box.fail{stroke:var(--fail);fill:color-mix(in srgb, var(--fail) 8%, var(--panel))}
+.state-box.missing{stroke:var(--skip);stroke-dasharray:4 3}
+/* skipped / n-a are NOT passes — distinct from the pass green and from each
+   other, so a mandated gate logged "skipped" can never read as cleared. */
+.state-box.skipped{stroke:var(--warn);stroke-dasharray:2 2}
+.state-box.na{stroke:var(--skip);stroke-dasharray:1 3;opacity:.7}
+.state-box.unknown{stroke:var(--warn);stroke-dasharray:3 2}
+.state-box.notreq{opacity:.32}
+.state-box.choice{fill:var(--panel);stroke:var(--accent)}
+.state-box:hover{stroke-width:2.5;cursor:pointer}
+/* Three lines only (P2-4) — bumped up now that `verbose` no longer competes
+   for the box. The graph scales to fit, so these are the floor. */
+.state-title{font-size:13px;font-weight:600}
+.state-sub{font-size:11px;fill:var(--muted)}
+.state-status{font-size:12px;font-weight:700;letter-spacing:.02em}
+.state-status.fail{fill:var(--fail)}
+.state-status.pass,.state-status.pass.low{fill:var(--pass)}
+.state-status.missing{fill:var(--skip)}
+.state-status.skipped,.state-status.unknown{fill:var(--warn)}
+.state-status.na{fill:var(--muted)}
+.state-status.notreq{fill:var(--muted)}
+
+.bookend{border:1px solid var(--border);border-radius:8px;padding:12px 16px;margin-bottom:14px;
+  background:var(--panel);max-width:900px}
+.bookend.output{margin-top:14px;margin-bottom:0}
+.bookend-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:4px}
+.bookend-title{font-size:15px;font-weight:600;margin-bottom:4px}
+.bookend-lens{font-size:11.5px;color:var(--muted);font-style:italic;margin-bottom:8px}
+.bookend-body{font-size:12.5px;line-height:1.55}
+.bookend-cite{font-size:10.5px;color:var(--muted);margin-top:6px}
+.reason-chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:10px;
+  background:color-mix(in srgb, var(--accent) 14%, transparent);color:var(--accent);vertical-align:middle}
+.reason-chip.unknown{background:transparent;color:var(--muted);font-weight:400;font-style:italic}
+
+.back-link{border:none;background:transparent;color:var(--accent);font-size:12px;cursor:pointer;
+  padding:0;margin:16px 0 4px 20px;font-family:var(--sans);display:block}
+.back-link:hover{text-decoration:underline}
+#rail-project-head .back-link{margin:12px 12px 2px}
+.rail-project-name{font-size:13px;font-weight:700;padding:2px 12px 10px;border-bottom:1px solid var(--border);margin-bottom:4px}
+
+.projects-overview{padding-bottom:20px}
+.project-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:0 20px}
+.project-card{border:1px solid var(--border);border-radius:8px;padding:14px 16px;cursor:pointer;background:var(--panel)}
+.project-card:hover{border-color:var(--accent)}
+.project-name{font-size:14px;font-weight:700;margin-bottom:8px}
+.project-stats{display:flex;flex-direction:column;gap:4px}
+.metric{font-size:11.5px;color:var(--text)}
+.metric.warn{color:var(--warn);font-weight:600}
+.metric.muted{color:var(--muted);font-style:italic}
+.bookend-gap{font-size:11px;color:var(--warn);margin-top:8px;padding-top:8px;border-top:1px dashed var(--border)}
+.edge{stroke:var(--muted);stroke-width:1.4;fill:none}
+.edge.taken{stroke:var(--accent);stroke-width:2.4}
+.edge.fail-back{stroke:var(--fail);stroke-dasharray:5 4;stroke-width:1.8}
+.edge-label{font-size:9.5px;fill:var(--muted)}
+.edge-label.fail-back{fill:var(--fail)}
+.group-label{font-size:10px;fill:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+
+#drawer h2{font-size:14px;margin:0 0 2px}
+#drawer .persona{font-size:11px;color:var(--muted);margin-bottom:10px}
+#drawer .question{font-size:13px;font-style:italic;margin-bottom:14px;padding:8px 10px;
+  background:var(--bg);border-radius:6px}
+#drawer .field{margin-bottom:10px}
+#drawer .field .k{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:2px}
+#drawer .field .v{font-size:12px;line-height:1.5}
+#drawer .withhold{color:var(--fail)}
+#drawer .chips{display:flex;flex-wrap:wrap;gap:4px}
+#drawer .chip{font-size:10.5px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+#drawer hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+#drawer .run-empty{font-size:12px;color:var(--muted);font-style:italic}
+#drawer .metric-row{display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px}
+#drawer .metric-row .muted{color:var(--muted)}
+#drawer .finding{border-left:3px solid var(--skip);padding:4px 8px;margin-bottom:6px;font-size:11.5px}
+#drawer .finding.blocking{border-color:var(--fail)}
+#drawer .finding.minor{border-color:var(--warn)}
+#drawer .finding.info{border-color:var(--accent)}
+#drawer .finding.out-of-scope{border-color:var(--muted)}
+#drawer .finding .loc{font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+#drawer pre.note{white-space:pre-wrap;font-family:var(--mono);font-size:11px;background:var(--bg);
+  padding:8px;border-radius:6px;max-height:220px;overflow:auto;line-height:1.5}
+/* A <button> since P2-5 (was a mouse-only <span>) — reset back to the bare
+   glyph so it looks identical. */
+#drawer .close{float:right;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;
+  border:none;background:none;font-family:inherit;padding:0}
+#drawer .close:hover{color:var(--text)}
+
+#empty{padding:40px;color:var(--muted);font-size:13px}
+.legend{font-size:10.5px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border);
+  display:flex;gap:16px;flex-wrap:wrap}
+.legend b{color:var(--text)}
+#banner{display:none;background:var(--warn);color:#1b1400;padding:6px 16px;font-size:12px}
+
+/* Coverage — what landed that no gate has seen. Hidden until renderCoverage()
+   sets a class, so a page that never computed it shows nothing rather than an
+   empty frame that would read as "clean". */
+#coverage{display:none}
+#coverage.coverage{display:block;padding:8px 16px;border-bottom:1px solid var(--border);
+  background:var(--panel);font-size:12px;max-height:30vh;overflow-y:auto;flex:0 0 auto}
+.coverage .cov-head{font-weight:600}
+.coverage.ok    .cov-head{color:var(--pass)}
+.coverage.warn  .cov-head{color:var(--warn)}
+.coverage.bad   .cov-head{color:var(--fail)}
+.coverage.muted .cov-head{color:var(--muted)}
+.coverage .cov-note{color:var(--muted);margin-top:3px;line-height:1.45}
+.coverage .cov-note code{font-family:var(--mono);font-size:11px}
+.coverage .cov-stale{color:var(--warn)}
+.coverage .cov-list{margin:6px 0 0;padding:0;list-style:none}
+.coverage .cov-list li{padding:2px 0;font-family:var(--mono);font-size:11px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.coverage .cov-tier{display:inline-block;min-width:22px;padding:0 4px;margin-right:6px;
+  border-radius:3px;font-size:10px;font-weight:700;text-align:center;color:#fff;font-family:var(--sans)}
+.coverage .cov-tier.t4{background:var(--fail)}
+.coverage .cov-tier.t3{background:var(--warn)}
+
+/* P2-5 / G8 — "skip to content" bypass. The first focusable element, off-screen
+   until it takes focus, so a keyboard user is not forced through the whole rail
+   to reach the centre panel. Injected by app.js (installSkipLink). */
+.skip-link{position:absolute;left:8px;top:-60px;z-index:100;
+  background:var(--panel);color:var(--accent);border:1px solid var(--accent);
+  border-radius:6px;padding:6px 12px;font-size:12px;text-decoration:none}
+.skip-link:focus{top:8px;outline:2px solid var(--accent);outline-offset:1px}
+#center:focus{outline:none}
+
+/* P2-5 — keyboard focus. :focus-visible, not :focus, so a mouse click never
+   paints a ring; only keyboard focus (Tab, or Esc/Enter landing here) does.
+   The rail rows and graph nodes are ARIA buttons (role+tabindex set in app.js)
+   and were previously mouse-only with no focus style anywhere in this file. */
+.exec-row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* On a selected row the 3px left accent border and a -2px inset ring doubled up
+   on the left edge (G3 Craft) — sit the ring just inside the border instead. */
+.exec-row.selected:focus-visible{outline-offset:-3px}
+.tab:focus-visible,.back-link:focus-visible,.seg:focus-visible,
+#drawer .close:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* An <g> outline is clipped by the SVG viewport and inconsistent across
+   engines — ring the box instead, the same visual language as the selected
+   node's accent stroke. dasharray:none so a status-dashed box (missing, skipped,
+   stale…) still gets a SOLID focus ring, matching the pass/fail nodes rather
+   than changing shape as you Tab (G3 Craft). When the node is also the selected
+   one, its own accent <rect> is the indicator — don't stack a second ring. */
+.state:focus{outline:none}
+.state:focus-visible:not(.selected) .state-box{stroke:var(--accent);stroke-width:3;stroke-dasharray:none}
+
+/* Narrow viewports. The desktop layout is three side-by-side columns —
+   340px rail | flexible graph | 420px drawer — which at phone widths crushes
+   the graph pane to a ~34px sliver (the 2026-09-01 review, P1-11). Below 820px
+   the columns stack and the page scrolls as one: the rail is a capped,
+   scrollable strip on top, the graph pane sits below it at its natural height,
+   and the drawer floats up over the content instead of stealing width from it.
+   Nothing here touches the desktop layout at >820px. */
+@media (max-width:820px){
+  body{overflow:auto}
+  #body{flex-direction:column;flex:0 0 auto}
+  /* Taller cap than the 46vh P1-11 shipped: P1-1/P1-2 added the summary bar +
+     metrics panel (~165px of fixed chrome) above the list, and at 46vh that
+     left ~2 change rows visible (G3 Craft, 2026-09-03). The metrics panel also
+     tightens up — its label carries the context the desktop framing lines do. */
+  #rail{width:auto;max-height:60vh;
+    border-right:none;border-bottom:1px solid var(--border)}
+  #rail .rail-summary{padding:6px 10px 4px}
+  #rail .rail-metrics{padding:2px 12px 6px}
+  #center{flex:0 0 auto;overflow:visible}
+  #drawer{position:fixed;left:0;right:0;bottom:0;width:auto;
+    max-height:85vh;z-index:30;border-left:none;border-top:1px solid var(--border);
+    transition:transform .15s ease;transform:translateY(100%)}
+  /* shadow only while open — on a closed sheet parked off the bottom edge it
+     would otherwise cast a ~40px band up onto the page */
+  #drawer.open{width:auto;transform:translateY(0);box-shadow:0 -10px 30px rgba(0,0,0,.22)}
+  .tabbar{padding:12px 14px 0}
+  #tabcontent,#graphwrap{padding:14px}
+  .legend{gap:6px 14px}
+}
