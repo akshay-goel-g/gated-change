@@ -1463,6 +1463,13 @@ test_status_label_says_when_the_kit_is_not_committed_yet() {
   assert_contains "the kit is not committed yet"
 }
 
+test_status_shows_a_change_name_with_quotes_and_backslashes_whole() {
+  newrepo
+  printf '%s\n' '{"type":"gate","change":"c \"q\" 5 a\\b","gate":"G1","tier":"T3","round":1,"commit":"abc1234","kit":"x","findings":0,"outcome":"pass","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"x","note":""}' >> "$(ledger_path)"
+  run status_run
+  assert_contains 'c "q" 5 a\b (commit abc1234)'
+}
+
 test_update_kit_dry_run_lists_the_install_base_as_untouched() {
   newrepo
   printf '%s\n' "$BASE_SHA" > "$REPO/.pipeline/.install-base"

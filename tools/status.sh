@@ -137,7 +137,10 @@ if [ -f "$LEDGER" ]; then
   if [ -n "$LAST_GATE_LINE" ]; then
     LAST_COMMIT="$(printf '%s' "$LAST_GATE_LINE" | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"
     LAST_DATE="$(printf '%s' "$LAST_GATE_LINE" | sed -n 's/.*"date":"\([^"]*\)".*/\1/p')"
-    LAST_CHANGE="$(printf '%s' "$LAST_GATE_LINE" | sed -n 's/.*"change":"\([^"]*\)".*/\1/p')"
+    # A change name may hold quotes or backslashes, stored JSON-escaped: read up to the first
+    # UNESCAPED quote, then undo the two escapes so the line shows the name as typed (R-016).
+    # Other JSON escapes (newline, \u00XX) stay literal on purpose: that is safe to print.
+    LAST_CHANGE="$(printf '%s' "$LAST_GATE_LINE" | sed -nE 's/.*"change":"((\\.|[^"\\])*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
   fi
 fi
 

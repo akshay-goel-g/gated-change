@@ -411,7 +411,13 @@ Things the hook also does, so none of them surprises you on your first push:
 - **Regeneration takes a while** on a slow machine (minutes, in one measured run) and prints
   nothing while it works. The hook regenerates the dashboard to see whether it changed, so a push from the main checkout
   waits even when the ledger has not moved (30 to 60 seconds in one measured run) and then commits nothing; a linked worktree skips it. `status.sh` and `ledger.sh compliance` are slow too on Git Bash for Windows (about 20 seconds and a minute
-  in one measured run, on a three-record ledger): give them a long timeout. `--no-verify` skips both the check and the regeneration.
+  in one measured run, on a three-record ledger): give them a long timeout. So is `ledger.sh add`, which every gate
+  runs: 4 to 6 seconds per row in one measured run on Git Bash for Windows (302 rows took about 30 minutes), so a
+  single `add` that looks hung is not, and a bulk import is impractical there. `--no-verify` skips both the check and the regeneration.
+- **Git may print CRLF-conversion warnings on Windows** for `.pipeline/.install-base` and the pull-request
+  template. They are harmless; the `.gitattributes` step covers only `.pipeline/project/`.
+- **An info finding whose file exists but whose line is past its end is refused** as no evidence. That is correct,
+  and easy to miss if you hide stderr: read the refusal message and cite a line that exists.
 - **Pushing a new branch counts everything since its base**, so a trust-boundary file whose commit is already on
   another branch of the remote can be listed again under "Files that tripped this"; a report naming the tip clears it.
 - **The first push of an existing project to an empty remote counts the whole history as "the
