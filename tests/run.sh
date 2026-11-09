@@ -577,6 +577,8 @@ test_reconcile_refuses_the_kits_own_surfaces_in_an_installed_copy() {
 
 # ...but the kit reviewing itself is exactly when that file IS the right one.
 test_reconcile_accepts_the_kits_own_surfaces_in_the_kit_itself() {
+  # Needs a parent commit to diff against: a shallow clone, or the first commit of a fresh repository, has none.
+  git -C "$KIT" rev-parse -q --verify HEAD~1 >/dev/null 2>&1 || { _skip "no HEAD~1 here (shallow clone or a single-commit repository)"; return; }
   run bash -c "cd '$KIT' && BASE=HEAD~1 bash tools/reconcile.sh T4 --allow-empty"
   case "$LAST_EXIT" in 0|1) _ok;; *) _fail "the kit's own surfaces must work in the kit: exit $LAST_EXIT";; esac
   assert_not_contains "not yours"
