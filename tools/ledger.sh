@@ -1725,7 +1725,7 @@ gate_latest_findings() {
 gate_outcome_note() {
   local n
   n="$(gate_entries "$1" "$2" | grep "\"outcome\":\"$3\"" | tail -1 \
-       | sed -n 's/.*"note":"\([^"]*\)".*/\1/p')"
+       | sed -nE 's/.*"note":"((\\.|[^"\\])*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
   [ -n "$n" ] && printf '%s' "$n" || printf 'no reason recorded'
 }
 
@@ -2506,7 +2506,7 @@ cmd_report() {
   cmd_gates
 
   local models
-  models=$(grep '"type":"gate"' "$LEDGER" | sed -n 's/.*"model":"\([^"]*\)".*/\1/p' | sort | uniq -c | sort -rn)
+  models=$(grep '"type":"gate"' "$LEDGER" | sed -nE 's/.*"model":"((\\.|[^"\\])*)".*/\1/p' | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g' | sort | uniq -c | sort -rn)
   if [ -n "$models" ]; then
     echo
     echo "Models used"
@@ -2524,8 +2524,10 @@ cmd_report() {
   echo "ROUNDS — where the failure rule engaged"
   echo "---------------------------------------"
   local rounds_tbl
+  local _tab=$'	'
   rounds_tbl=$(grep '"type":"gate"' "$LEDGER" \
-    | sed -n 's/.*"change":"\([^"]*\)".*"round":\([0-9]*\).*"findings":\([0-9]*\).*/\1\t\2\t\3/p' \
+    | sed -nE 's/.*"change":"((\\.|[^"\\])*)".*"round":([0-9]*).*"findings":([0-9]*).*/\1'"$_tab"'\3'"$_tab"'\4/p' \
+    | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g' \
     | awk -F'\t' '{ if ($2 > mx[$1]) mx[$1] = $2; f[$1] += $3; r[$1]++ }
         END { for (c in mx) printf "  %-34s %d round(s)  %2d gate run(s)  %2d finding(s)\n", c, mx[c], r[c], f[c] }' \
     | sort)
