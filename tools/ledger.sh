@@ -2511,7 +2511,7 @@ cmd_report() {
     echo
     echo "Models used"
     echo "-----------"
-    printf '%s\n' "$models" | awk '{printf "  %-28s %s runs\n", $2, $1}'
+    printf '%s\n' "$models" | awk '{c = $1; sub(/^ *[0-9]+ /, ""); printf "  %-28s %s runs\n", $0, c}'
     echo "  If results shift, check here before concluding the process changed."
   fi
 

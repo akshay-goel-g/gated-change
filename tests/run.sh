@@ -1472,20 +1472,20 @@ test_status_shows_a_change_name_with_quotes_and_backslashes_whole() {
 
 test_ledger_report_shows_change_names_and_models_with_quotes_and_backslashes_whole() {
   newrepo
-  printf '%s\n' '{"type":"gate","change":"c \"q\" 5 a\\b","gate":"G1","tier":"T3","round":2,"commit":"abc1234","kit":"x","findings":3,"outcome":"pass","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"m\"x\"","note":""}' >> "$(ledger_path)"
+  printf '%s\n' '{"type":"gate","change":"c \"q\" 5 a\\b","gate":"G1","tier":"T3","round":2,"commit":"abc1234","kit":"x","findings":3,"outcome":"pass","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"m\"x\" y","note":""}' >> "$(ledger_path)"
   # A second change sharing the first quote-cut prefix `c ` must get its own row, not merge into the first.
   printf '%s\n' '{"type":"gate","change":"c \"r\" 6","gate":"G1","tier":"T3","round":1,"commit":"abc1234","kit":"x","findings":1,"outcome":"pass","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"m","note":""}' >> "$(ledger_path)"
   LAST_OUT="$(led report 2>&1)"; LAST_EXIT=$?
   assert_contains 'c "r" 6'
   assert_contains 'c "q" 5 a\b'
-  assert_contains 'm"x"'
+  assert_contains 'm"x" y'
   assert_contains '2 round(s)'
 }
 
 test_ledger_n_a_reason_with_quotes_is_shown_whole() {
   newrepo
-  printf '%s\n' '{"type":"gate","change":"c","gate":"G3","tier":"T4","round":1,"commit":"abc1234","kit":"x","findings":0,"outcome":"n/a","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"x","note":"no \"UI\" here, a\\b"}' >> "$(ledger_path)"
-  LAST_OUT="$(led compliance --change c --tier T4 --round 1 2>&1)"; LAST_EXIT=$?
+  printf '%s\n' '{"type":"gate","change":"c \"q\"","gate":"G3","tier":"T3","round":1,"commit":"abc1234","kit":"x","findings":0,"outcome":"n/a","confidence":"fresh","challenged_premise":false,"minutes":0,"tokens":0,"lane":"normal","model":"x","note":"no \"UI\" here, a\\b"}' >> "$(ledger_path)"
+  LAST_OUT="$(led compliance --change 'c "q"' --tier T3 --round 1 2>&1)"; LAST_EXIT=$?
   assert_contains 'no "UI" here, a\b'
 }
 
