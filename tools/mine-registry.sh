@@ -22,7 +22,11 @@ set -euo pipefail
 # Default lands in THIS kit's project/ (<kit>/project/registry-draft.md), wherever the
 # script is run from. It used to be ./project/..., i.e. the repo root, so an install's draft
 # landed outside .pipeline/ and the next step's `cp -r templates/project` nested (E7).
-. "$(dirname "${BASH_SOURCE[0]}")/lib/data-root.sh" || { echo "REFUSED: tools/lib/data-root.sh is missing or unreadable, so PIPELINE_DATA cannot be checked (a partial update-kit?). Nothing was read or written." >&2; exit 2; }
+# Test the file BEFORE sourcing it: on bash 3.2 (macOS) a failed `.` here exited 1 with a raw
+# shell error instead of reaching the `||` refusal (R-013), so the refusal never ran.
+_dr_lib="$(dirname "${BASH_SOURCE[0]}")/lib/data-root.sh"
+[ -f "$_dr_lib" ] && [ -r "$_dr_lib" ] || { echo "REFUSED: tools/lib/data-root.sh is missing or unreadable, so PIPELINE_DATA cannot be checked (a partial update-kit?). Nothing was read or written." >&2; exit 2; }
+. "$_dr_lib" || { echo "REFUSED: tools/lib/data-root.sh is missing or unreadable, so PIPELINE_DATA cannot be checked (a partial update-kit?). Nothing was read or written." >&2; exit 2; }
 data_root_require mine-registry.sh
 OUT="${1:-${PIPELINE_DATA:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/project/registry-draft.md}"
 SINCE="${SINCE:-3 years ago}"
