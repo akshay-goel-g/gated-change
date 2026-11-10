@@ -14,7 +14,7 @@ Never run the real update without the user's yes. Download the release, then pre
 
 ```bash
 KIT_SRC="$(mktemp -d)"
-git -c core.autocrlf=false clone --quiet --depth 1 --branch "${GATED_CHANGE_REF:-v1.0.1}" "${GATED_CHANGE_REPO:-https://github.com/akshay-goel-g/gated-change}" "$KIT_SRC/kit" || { rm -rf "$KIT_SRC"; echo "could not download the kit" >&2; false; }
+git -c core.autocrlf=false clone --quiet --depth 1 --branch "${GATED_CHANGE_REF:-v1.0.2}" "${GATED_CHANGE_REPO:-https://github.com/akshay-goel-g/gated-change}" "$KIT_SRC/kit" || { rm -rf "$KIT_SRC"; echo "could not download the kit" >&2; false; }
 bash .pipeline/tools/update-kit.sh "$KIT_SRC/kit" --dry-run
 ```
 

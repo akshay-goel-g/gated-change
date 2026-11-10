@@ -23,7 +23,7 @@ only `bash` and `git`, and nothing from your project leaves your machine.
 The plugin itself holds only skills (Markdown): no scripts, so the plugin directory can host it. The kit's scripts come from the public repository. Installing the kit does the following, and the install skill
 asks before each step that is outside `.pipeline/`:
 
-- **Downloads the kit** with `git clone` from `https://github.com/akshay-goel-g/gated-change` at the tag `v1.0.1`, and copies it into your repository as `.pipeline/` (about 70 files, under 1 MB). The install skill names the repository and tag and asks first, because you will then run its bash scripts.
+- **Downloads the kit** with `git clone` from `https://github.com/akshay-goel-g/gated-change` at the tag `v1.0.2`, and copies it into your repository as `.pipeline/` (about 70 files, under 1 MB). The install skill names the repository and tag and asks first, because you will then run its bash scripts.
 - **Optionally writes `.git/hooks/pre-push`** (`install-hook.sh`): a pre-push check that blocks a
   push touching your trust-boundary files until a security review on record names the commit.
 - **Optionally merges a reminder hook into `.claude/settings.json`** (`install-claude-hook.sh`): a

@@ -1,7 +1,7 @@
 {
   "name": "gated-change",
   "displayName": "Gated Change",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A routed review pipeline for AI-assisted software work: risk tiers from the real diff, review gates, and an append-only ledger. Bash and git only.",
   "author": {
     "name": "Akshey Goel"

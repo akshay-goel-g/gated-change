@@ -23,9 +23,33 @@ later version. It is the one artifact a user can never regenerate.
 
 ---
 
-## Unreleased
+## 1.0.2
 
-### Plugin: no scripts shipped
+### Fixed
+
+- `tools/dashboard.sh`: regenerating the dashboard is about three times faster on Git Bash for
+  Windows (an 807-row ledger went from 3m28s to about 1 minute), because each ledger row is now
+  escaped with bash substitutions instead of a chain of `sed`/`awk`/`tr` processes. Rows longer
+  than 4096 bytes use the linear pipeline, so a hostile 400,000-byte row takes under a second. The
+  embedded ledger output is byte-identical to before; the suite pins the new escaper to the old one.
+- `tools/status.sh`: the LAST GATE line shows a change name containing double quotes or backslashes
+  whole instead of cutting it at the first quote.
+- `README.md`: says that `ledger.sh add` is slow on Git Bash for Windows (4 to 6 seconds a row in one
+  measured run), that CRLF-conversion warnings there are harmless, and that an info finding citing a
+  line past its file's end is refused on a fresh T3 or T4 pass.
+
+### Added
+
+Nothing.
+
+### Action required
+
+None for an installed kit. The pre-push hook copy in `.git/hooks` is unchanged. The plugin's install
+and update skills now clone the tag `v1.0.2`.
+
+---
+
+## 1.0.1 — plugin: no scripts shipped
 
 The plugin directory refuses scripts from an unverified publisher, so the plugin now contains only
 skills (Markdown), `plugin.json` and the icon. `plugin/kit/` is gone: the install and update skills
