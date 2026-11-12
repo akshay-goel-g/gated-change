@@ -243,6 +243,10 @@ rm -rf .git ledger.jsonl dashboard.html security-reports project \
 cd ..
 ```
 
+If you cloned the private repository rather than the public one, `.pipeline/private/` (the script that publishes the kit itself) and
+`.pipeline/.public-exclude` are also left; nothing in an installed project reads them, so delete them or keep them. `.pipeline/.gitignore`
+stays and does something: git honours it, so `*.log`, `dist/`, `target/` and `node_modules/` under `.pipeline/` are not tracked.
+
 <details>
 <summary>Why each of those is removed, and what to keep</summary>
 
@@ -913,6 +917,7 @@ ledger.sh assume     --change <n> --assumed '<what>' --resolution asked|verified
                      [--basis '<why>'] [--round N]
 ledger.sh escape     --change <n> --found-by user|self|monitoring [--severity high]
 ledger.sh compliance --change <n> --tier T4 [--round N]       # exit 1 unless every mandated gate passed
+ledger.sh compliance --latest   --tier T4 [--round N]       # the same, naming the change by the newest route row (the Stop hook prints this for a name with spaces, quotes or non-ASCII characters)
 ledger.sh report                                              # both metric tiers
 ledger.sh gates                                               # per-gate yield / disagreement / cost
 ```
@@ -1219,6 +1224,25 @@ The diff is empty — almost always a wrong `BASE`. Set `BASE=<branch-point>`, o
 **`ledger.sh` refuses my change name.**
 You are on `master`/`main`, and a route record named for a permanent branch collects
 reconciles from every change. Set `CHANGE=<name>`.
+
+**`ledger.sh add` says "REFUSED … no such file 'README.md' in the repository".**
+`--evidence <file:line>` is relative to *your repository*, not to the kit. A file of the kit that
+you installed under `.pipeline/` is `.pipeline/README.md:1`, and the line must exist in that file.
+
+**A tool says "REFUSED: tools/lib/data-root.sh is missing or unreadable".**
+Part of the kit is gone from `.pipeline/` (an interrupted `update-kit.sh`, or a file deleted by
+hand). Nothing was read or written. Copy the kit again (step 1 of the quick start), or run
+`bash .pipeline/tools/update-kit.sh <path-to-a-fresh-clone>`, then run the tool again.
+
+**`status.sh` says "No surfaces file … Refusing to guess".**
+You copied the kit with a plain `cp -r` and did not delete its `project/` folder, or deleted it and
+have not yet created your own. Do step 3 of the quick start: it creates `project/` from
+`templates/project`, which holds a starter `surfaces.conf` for you to edit. Ready-made ones for
+common project types are in `.pipeline/examples/surfaces/`.
+
+**A `ledger.sh add` command printed by `compliance` has `'<why>'` in it.**
+Replace the placeholder with the real reason before you run it. Run unedited, `ledger.sh add`
+refuses it (exit 2, "placeholder"): an `n/a` note that is nothing but angle-bracketed `<...>` text is never recorded, however it is padded, quoted or ended with ASCII punctuation (Unicode quotes, non-breaking spaces and ellipses count as text and are not caught — R-027). A reason that keeps a word of its own is accepted.
 
 **`compliance` says `UNRESOLVED` for a gate (G8 at T2/T3, for example).**
 That matrix cell has a footnoted condition the ledger cannot evaluate. Run the gate, or

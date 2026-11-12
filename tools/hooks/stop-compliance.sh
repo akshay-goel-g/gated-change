@@ -74,13 +74,17 @@ fi
 ROUTE="$(grep '"type":"route"' "$LEDGER" 2>/dev/null | tail -n 1)"
 [ -n "$ROUTE" ] || exit 0
 
-CHANGE="$(printf '%s' "$ROUTE" | sed -n 's/.*"change":"\([^"]*\)".*/\1/p')"
+# Read up to the first UNESCAPED quote, then undo the two JSON escapes, so a name with a quote or a backslash is the
+# name that was typed (R-021). sed -E: BSD sed has no \| in a basic expression.
+RAWCHANGE="$(printf '%s' "$ROUTE" | sed -nE 's/.*"change":"((\\.|[^"\\])*)".*/\1/p')"
+# Any other JSON escape (\t \n \r \u00XX) cannot be undone here, so the name read would not be the name recorded and
+# compliance would be asked about a change that does not exist: fail open rather than block a stop that cannot be satisfied.
+case "$(printf '%s' "$RAWCHANGE" | sed -e 's/\\\\//g' -e 's/\\"//g')" in *\\*) exit 0;; esac
+CHANGE="$(printf '%s' "$RAWCHANGE" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g')"
 TIER="$(printf '%s' "$ROUTE" | sed -n 's/.*"actual":"\(T[0-9]\)".*/\1/p')"
 ROUND="$(printf '%s' "$ROUTE" | sed -n 's/.*"round":\([0-9][0-9]*\).*/\1/p')"
 case "$TIER" in T3|T4) ;; *) exit 0;; esac
 [ -n "$CHANGE" ] && [ -n "$ROUND" ] || exit 0
-# A change name with a quote or backslash was escaped on write; do not guess at it.
-case "$CHANGE" in *\\*|*\"*) exit 0;; esac
 
 # Cross-turn cap: the state is HEAD + the working tree + the ledger. Progress changes it and re-arms
 # the hook; a stuck state (nothing changed since the last block) is blocked at most MAX_ATTEMPTS times.
@@ -113,27 +117,38 @@ if [ "$PREV_FP" = "$FP" ]; then N=$((PREV_N + 1)); else N=1; fi
 printf '%s %s\n' "$FP" "$N" > "$STATE" 2>/dev/null || true
 
 # The change name is ledger content, and this text goes to the model. Show a name only if it is made of
-# ordinary characters; otherwise show a sanitised one and give NO pasteable command, so a hostile name cannot
-# become a shell command or smuggle instructions into the reason.
+# ordinary characters; otherwise show a fixed "withheld" token and print only a command that names no change (--latest), so a
+# hostile name cannot become a shell command or smuggle instructions into the reason.
 case "$CHANGE" in
   *[!A-Za-z0-9._/-]*)
-    SHOWN="$(printf '%s' "$CHANGE" | tr -c 'A-Za-z0-9._/-' '?' | cut -c1-80)"
-    CHECKCMD="(the change name contains unusual characters; run ledger.sh compliance for it by hand)";;
+    # A fixed token, not a sanitised prefix: a prefix read as "Fix??login???redirect" and said the name was not shown while
+    # showing part of it (G8 round 12), and nothing of a hostile name needs to reach the model here. Fixed text only, so the
+    # replacement below can hold no &, backslash or ledger content.
+    SHOWN="(change name withheld)"
+    # The command names no change: --latest reads the newest route row itself, so nothing from the ledger is pasted (R-036).
+    CHECKCMD="${PIPELINE_DATA:+PIPELINE_DATA='${PIPELINE_DATA%/}' }bash \"$KIT/tools/ledger.sh\" compliance --latest --tier $TIER --round $ROUND"
+    NOTE="(The change name has unusual characters, so it is not shown. --latest checks the newest route, which is this change unless another was routed since; the header names the change it judged.)
+";;
   *)
-    SHOWN="$CHANGE"
+    SHOWN="$CHANGE"; NOTE=""
     CHECKCMD="${PIPELINE_DATA:+PIPELINE_DATA='${PIPELINE_DATA%/}' }bash \"$KIT/tools/ledger.sh\" compliance --change $CHANGE --tier $TIER --round $ROUND";;
 esac
 
+# Mask the name in the WHOLE output BEFORE any line is cut: a 300-column cut can truncate a long shell-quoted name so
+# it matches neither form below and reaches the model readable (G4 round 2).
+QCHANGE="$(printf '%q' "$CHANGE")"
+OUT="${OUT//"$QCHANGE"/$SHOWN}"
+OUT="${OUT//"$CHANGE"/$SHOWN}"
 BODY="$(printf '%s\n' "$OUT" | grep -vE '^[[:space:]]*PASS[[:space:]]' | cut -c1-300)"
 if [ "$(printf '%s\n' "$BODY" | wc -l)" -gt 24 ]; then
   BODY="$(printf '%s\n' "$BODY" | head -n 12)
   [...]
 $(printf '%s\n' "$BODY" | tail -n 12)"
 fi
-# The raw change name appears in compliance's own text; show the sanitised one there too.
-BODY="${BODY//"$CHANGE"/$SHOWN}"
-REASON="$(printf 'gated-change: %s is routed %s (round %s) and `ledger.sh compliance` does not pass, so it is not done.\n\n%s\n\nRun each missing gate as a FRESH-context review (a subagent or new session handed the card in core/cards/, never the author grading its own work; core/02-gates.md), log each with ledger.sh add, then check again:\n  %s\n(Blocked %s of %s times for this state; PIPELINE_STOP_HOOK=off disables this hook.)' \
-  "$SHOWN" "$TIER" "$ROUND" "$BODY" "$CHECKCMD" "$N" "$MAX_ATTEMPTS")"
+# The change name was masked above, in the whole output and before the cut (R-023). Here the shown name (the fixed token for an awkward one)
+# stands in for it in the header.
+REASON="$(printf 'gated-change: %s is routed %s (round %s) and `ledger.sh compliance` does not pass, so it is not done.\n\n%s\n\nRun each missing gate as a FRESH-context review (a subagent or new session handed the card in core/cards/, never the author grading its own work; core/02-gates.md), log each with ledger.sh add, then check again:\n  %s\n%s(Blocked %s of %s times for this state; PIPELINE_STOP_HOOK=off disables this hook.)' \
+  "$SHOWN" "$TIER" "$ROUND" "$BODY" "$CHECKCMD" "$NOTE" "$N" "$MAX_ATTEMPTS")"
 
 # JSON string: backslash, quote and newline are escaped, tab becomes a space, every other control character
 # (CR included) is dropped.

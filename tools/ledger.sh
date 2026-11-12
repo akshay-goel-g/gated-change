@@ -24,8 +24,9 @@
 #            is legal and logged, and is what `compliance` refuses at T3/T4.
 #   ledger.sh report
 #   ledger.sh gates
-#   ledger.sh compliance --change <name> --tier T4 [--round N]
+#   ledger.sh compliance (--change <name> | --latest) --tier T4 [--round N]
 #            Did the gates this tier MANDATES actually pass? Exits 1 if not.
+#            --latest names the change by the newest route row, so a printed command need not carry a name (R-036).
 #            The one check that is not self-graded — "skipped" is not "passed".
 #   ledger.sh verify [--allow-joins] [--expect-head <hash>] [--against <git rev>]
 #            Every record carries "prev", the sha256 of the line before it. Verifies the chain: a line
@@ -465,6 +466,15 @@ detect_kit() {
   h="$(cat "$KIT_ROOT"/tools/*.sh "$KIT_ROOT"/tools/lib/*.sh 2>/dev/null \
        | cksum 2>/dev/null | awk '{printf "%08x", $1}')"
   printf '%s+%s' "$v" "${h:-nohash}"
+}
+
+# is_placeholder_text <text>: true when the text holds at least one `<...>` group and, with every such group removed,
+# no letter or digit is left (a byte above 127 counts as a letter, so a non-English reason is never mistaken for one).
+# That is a printed-hint placeholder ('<why>', ' <why> ', '"<why>"', '<why>.') however it was padded or quoted; a real
+# reason that merely mentions a tag ('no <b> tags touched') keeps its words and is not one (R-024, R-025, R-027, G8 r8).
+is_placeholder_text() {
+  case "$1" in *"<"*">"*) ;; *) return 1;; esac
+  [ -z "$(printf '%s' "$1" | sed -E 's/<[^<>]*>//g' | LC_ALL=C tr -cd '[:alnum:]\200-\377')" ]
 }
 
 # Escape a string for a JSON string context. Notes are long agent-written prose
@@ -936,6 +946,14 @@ cmd_add() {
     echo "  warning: --outcome n/a with no --note. Compliance will show 'no reason" >&2
     echo "           recorded', which is what a skipped gate looks like to a reviewer." >&2
   fi
+  # A reason that is still the placeholder from a printed hint ('<why>') is not a reason: compliance would
+  # count the gate as satisfied by it. Refuse it, as a bare n/a is only warned about but this is worse (R-024).
+  if [ "$outcome" = "n/a" ]; then
+    if is_placeholder_text "$note"; then
+      echo "REFUSED: --note '$note' is a placeholder, not a reason. Say why this gate does not fire here." >&2
+      exit 2
+    fi
+  fi
 
   # `skipped`/`n/a` reviewed nothing, so they have no confidence to report and
   # --confidence is not required for them (the check above only demands it for a
@@ -1384,6 +1402,26 @@ cmd_assume() {
     exit 2; }
   change_is_branchy "$change" && refuse_branchy_change "$change"
 
+  # A value that is still a `<...>` placeholder from a printed hint ('<name>', '<what>') is not a record of anything,
+  # and the ledger is append-only: refuse it here, as `add --outcome n/a --note '<why>'` is refused (R-024, R-030).
+  # `--assumed` is refused when WRITING an assumption (defaulted). For asked/verified it is refused too, UNLESS an
+  # unresolved row with that exact text exists: an older kit or a merged branch may hold a `defaulted` row whose text is a
+  # placeholder, and the row that resolves it must repeat that text (unresolved_assumptions matches on it), so refusing
+  # it there would block the change for good (G4 round 4). Otherwise it would be a junk row that resolves nothing (G8 r6).
+  # The unresolved list is captured first and matched with a here-string: `grep -q` in a pipeline exits at the first hit,
+  # the writer dies of SIGPIPE, and under pipefail that reads as "no match" (see the note at the `pipefail` rule above).
+  local _f _vals=("$change" "$basis") _unres=""
+  [ "$resolution" = defaulted ] || _unres="$(unresolved_assumptions "$change")"
+  if [ "$resolution" = defaulted ] || ! grep -qxF -- "$assumed" <<<"$_unres"; then
+    _vals+=("$assumed")
+  fi
+  for _f in "${_vals[@]}"; do
+    if is_placeholder_text "$_f"; then
+      echo "REFUSED: '$_f' is a placeholder from a printed hint, not a value. Replace it with the real text; the ledger is append-only." >&2
+      exit 2
+    fi
+  done
+
   case "$resolution" in
     asked|verified|defaulted) ;;
     *) echo "REFUSED: --resolution must be asked, verified, or defaulted (got '$resolution')." >&2
@@ -1638,6 +1676,18 @@ change_unmarked_base_changes() {
              # an abbreviated spelling of the same commit is the same base (rows written before bases were full)
              if (n++ == 0) first = b; else if (index(b, first) != 1 && index(first, b) != 1 && $0 !~ /"restart":true/) c++ }
            END { print c + 0 }'
+}
+
+# The change named by the newest route row, as it was typed: the name is read to the first unescaped quote and the
+# two JSON escapes \" and \\ are undone (the same reading as tools/hooks/stop-compliance.sh). Any other JSON escape
+# cannot be undone here, so nothing is printed and the status is 1. This lets a printed command name no change at all,
+# so a name with spaces, quotes or non-ASCII characters never has to be pasted or shown (R-036).
+latest_route_change() {
+  local _raw
+  _raw="$(grep '"type":"route"' "$LEDGER" 2>/dev/null | tail -n 1 | sed -nE 's/.*"change":"((\\.|[^"\\])*)".*/\1/p')"
+  [ -n "$_raw" ] || return 1
+  case "$(printf '%s' "$_raw" | sed -e 's/\\\\//g' -e 's/\\"//g')" in *\\*) return 1;; esac
+  printf '%s' "$_raw" | sed -e 's/\\"/"/g' -e 's/\\\\/\\/g'
 }
 
 # The highest round with a route entry in the change's current lineage, or 1.
@@ -1938,7 +1988,7 @@ commit_bound_to_change() {
 }
 
 cmd_compliance() {
-  local change="" tier="" round=1 round_set=0
+  local change="" tier="" round=1 round_set=0 latest=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --change|--tier|--round)
@@ -1951,11 +2001,16 @@ cmd_compliance() {
     case "$1" in
       --change) change="$2"; shift 2;; --tier) tier="$2"; shift 2;;
       --round) round="$2"; round_set=1; shift 2;;
+      --latest) latest=1; shift;;
       *) echo "unknown option: $1" >&2; exit 2;;
     esac
   done
+  if [ "$latest" -eq 1 ]; then
+    [ -z "$change" ] || { echo "REFUSED: --latest and --change are two ways to name the change; give one." >&2; exit 2; }
+    change="$(latest_route_change)" || { echo "REFUSED: --latest found no readable route row in the ledger; use --change <name>." >&2; exit 2; }
+  fi
   [ -n "$change" ] && [ -n "$tier" ] || {
-    echo "usage: ledger.sh compliance --change <name> --tier <T1..T4> [--round N]" >&2; exit 2; }
+    echo "usage: ledger.sh compliance (--change <name> | --latest) --tier <T1..T4> [--round N]" >&2; exit 2; }
 
   # Without --round the check is about where the change IS: the latest round of its current
   # lineage, not round 1. Defaulting to 1 reported "satisfied at round 1" for a change whose round 1
@@ -2152,8 +2207,8 @@ cmd_compliance() {
         fi
         printf "  REFUSED    %-4s %-9s logged n/a with no reason — the n/a rule requires one\n" \
           "$g" "$(gate_name "$g")"
-        printf "             ledger.sh add --change %s --gate %s --tier %s --outcome n/a --note '<why>'\n" \
-          "$change" "$g" "$tier"
+        printf "             bash %s add --change %s --gate %s --tier %s --outcome n/a --note '<why>'\n" \
+          "$(printf '%q' "$0")" "$(printf '%q' "$change")" "$g" "$tier"
         missing="${missing}${missing:+ }$g"
         n_missing=$((n_missing + 1))
         continue
@@ -2188,8 +2243,8 @@ cmd_compliance() {
       printf "           %s says:%s\n" "$(matrix_cell "$g" "$tier")" \
         "$(matrix_footnote "$(matrix_marker "$g" "$tier")")"
       printf "           Run it, or log why it does not fire:\n"
-      printf "           ledger.sh add --change %s --gate %s --tier %s --outcome n/a --note '<why>'\n" \
-        "$change" "$g" "$tier"
+      printf "           bash %s add --change %s --gate %s --tier %s --outcome n/a --note '<why>'\n" \
+        "$(printf '%q' "$0")" "$(printf '%q' "$change")" "$g" "$tier"
     else
       printf "  %-10s %-4s %s\n" "$state" "$g" "$(gate_name "$g")"
     fi
@@ -2274,7 +2329,7 @@ cmd_compliance() {
     echo "  rather than noticed after release."
     echo
     echo "  Ask, then record the answer:"
-    echo "    bash tools/ledger.sh assume --change $change --assumed '<the same text>' \\"
+    echo "    bash $(printf '%q' "$0") assume --change $(printf '%q' "$change") --assumed '<the same text>' \\"
     echo "         --resolution asked --basis '<what they said>'"
     echo
     echo "  Or, if it was established from the code rather than asked:"
@@ -2312,7 +2367,7 @@ cmd_compliance() {
       echo "  nothing on record says why it exists."
       echo
       echo "  Record one, either is sufficient:"
-      echo "    bash $0 add --change $change --gate G1 --tier $tier --round 1 \\"
+      echo "    bash $(printf '%q' "$0") add --change $(printf '%q' "$change") --gate G1 --tier $tier --round 1 \\"
       echo "         --outcome pass --confidence fresh --note '<why this change exists>' \\"
       echo "         --evidence <file:line of the intent it was checked against>"
       echo "  (Give REASON='<why>' on the reconcile.sh run that records the route instead, when you fire it:"

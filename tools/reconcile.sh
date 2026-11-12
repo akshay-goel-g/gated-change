@@ -798,7 +798,7 @@ else
   echo "Reconciled — routing matches. This says nothing about whether the"
   echo "gates above ran."
   echo
-  echo "  bash $(dirname "$0")/ledger.sh compliance --change \"$CHANGE\" --tier $ACTUAL${_ROUND_HINT}"
+  echo "  bash $(printf '%q' "$(dirname "$0")")/ledger.sh compliance --change $(printf '%q' "$CHANGE") --tier $ACTUAL${_ROUND_HINT}"
   echo
   echo "  is the check that answers that, and it is the one that decides release."
   exit 0
