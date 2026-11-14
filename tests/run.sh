@@ -9164,6 +9164,100 @@ test_escape_note_is_not_fooled_by_a_large_ledger_with_an_early_match() {
   done
 }
 
+# R-033: the same `producer | grep -q` shape was used at eleven more sites in ledger.sh. Each answers "is there a row like this" about
+# the change's own rows, so the producer's output is long exactly when the change has had many rounds. Each helper is run against
+# a change whose route and gate rows alone are several pipe buffers long; the helpers are sourced from a copy of ledger.sh with its
+# command dispatch removed (they are not reachable one at a time from the command line).
+_ledger_lib_dir() {
+  local d; d="$(mktemp -d)"; mkdir -p "$d/tools"
+  cp -R "$KIT/tools/lib" "$d/tools/lib"
+  sed '/^case "\${1:-}" in/,$d' "$KIT/tools/ledger.sh" > "$d/tools/lib.sh"
+  printf '%s' "$d"
+}
+
+test_ledger_row_lookups_are_not_fooled_by_a_change_with_many_long_rows() {
+  local d; d="$(_ledger_lib_dir)"
+  awk 'BEGIN {
+    printf "{\"type\":\"route\",\"change\":\"big\",\"round\":1,\"action\":\"edit\",\"base\":\"abc123\",\"reason\":\"why\"}\n"
+    printf "{\"type\":\"gate\",\"change\":\"big\",\"gate\":\"G1\",\"round\":1,\"outcome\":\"pass\",\"note\":\"first\"}\n"
+    for (i = 2; i <= 1500; i++) {
+      printf "{\"type\":\"route\",\"change\":\"big\",\"round\":%d,\"base\":\"abc123\",\"reason\":\"padding padding padding padding padding\"}\n", i
+      printf "{\"type\":\"gate\",\"change\":\"big\",\"gate\":\"G1\",\"round\":%d,\"outcome\":\"pass\",\"note\":\"padding padding padding padding\"}\n", i
+    }
+  }' > "$d/ledger.jsonl"
+  [ "$(wc -c < "$d/ledger.jsonl" | tr -d ' ')" -gt 200000 ] && _ok || _fail "the fixture ledger is not large enough to fill a pipe"
+  local out
+  out="$( set -uo pipefail; LEDGER="$d/ledger.jsonl"; . "$d/tools/lib.sh"
+    for i in 1 2 3; do
+      change_has_route big            && printf 'route=ok '    || printf 'route=NO '
+      change_has_any_action_route big && printf 'action=ok '   || printf 'action=NO '
+      change_has_round1 big           && printf 'round1=ok '   || printf 'round1=NO '
+      gate_has_outcome big G1 pass    && printf 'outcome=ok '  || printf 'outcome=NO '
+      gate_outcome_has_reason big G1 pass && printf 'reason=ok ' || printf 'reason=NO '
+      change_has_recorded_reason big  && printf 'why=ok\n'     || printf 'why=NO\n'
+    done 2>&1 )"
+  rm -rf "$d"
+  case "$out" in *NO*) _fail "a lookup on a large ledger read an existing row as absent: $out";; *) _ok;; esac
+  [ "$(printf '%s\n' "$out" | grep -c 'route=ok action=ok round1=ok outcome=ok reason=ok why=ok')" -eq 3 ] && _ok || _fail "unexpected lookup output: $out"
+}
+
+test_compliance_names_the_base_note_correctly_for_a_change_with_many_long_routes() {
+  newrepo
+  awk 'BEGIN {
+    printf "{\"type\":\"route\",\"change\":\"big\",\"round\":1,\"actual\":\"T2\",\"base\":\"abc123\",\"reason\":\"why\"}\n"
+    for (i = 2; i <= 1500; i++)
+      printf "{\"type\":\"route\",\"change\":\"big\",\"round\":%d,\"actual\":\"T2\",\"base\":\"abc123\",\"reason\":\"padding padding padding padding padding\"}\n", i
+  }' >> "$(ledger_path)"
+  local i
+  for i in 1 2 3; do
+    LAST_OUT="$(led compliance --change big --tier T2 --round 1 2>&1)"; LAST_EXIT=$?
+    assert_contains "does not resolve to one commit"
+    assert_not_contains "no route is recorded"
+  done
+}
+
+# R-033, the class: the two tests above name the helpers and the NOTE they cover, so a NEW `producer | grep -q` added to ledger.sh later is
+# caught by nothing and reads as "no route" on a large ledger. Use `| has_match` (or capture first and use a here-string). A `grep -q` on a
+# here-string or a file has no pipe and is fine.
+#
+# _grep_q_after_a_pipe reads numbered lines (grep -n) and prints the ones that pipe into a quiet grep, in any spelling: -q, -Fq, -i -q,
+# --quiet, --silent. `||` is blanked first (`a || grep -q PAT file` is not a pipe), and comment lines are skipped (two of them quote the
+# pattern to explain it).
+_grep_q_after_a_pipe() {
+  sed 's/||/  /g' | grep -E '\|[^|]*grep[^|]*[[:space:]](-[a-zA-Z]*q[a-zA-Z]*|--quiet|--silent)([[:space:]]|$)' | grep -vE '^[0-9]+:[[:space:]]*#'
+}
+
+test_ledger_sh_has_no_producer_piped_into_grep_q() {
+  local hits
+  hits="$(grep -n '' "$KIT/tools/ledger.sh" | _grep_q_after_a_pipe)"
+  [ -z "$hits" ] && _ok || _fail "tools/ledger.sh pipes into grep -q (SIGPIPE under pipefail, R-033); use has_match: $hits"
+}
+
+# The guard has to see every spelling it claims to, and none of the safe shapes.
+test_the_grep_q_guard_sees_every_spelling_and_none_of_the_safe_shapes() {
+  local bad safe line
+  bad='x | grep -q p
+x | grep -Fq p
+x |grep -q p
+x | grep -i -q p
+x | grep --quiet p
+x | grep -e p -q
+x | grep -qE "a|b"
+x | grep p | grep -xq p'
+  safe='x || grep -q p file
+grep -q p <<<"$v"
+grep -qxF -- "$a" <<<"$u"
+x | grep -c p
+# a comment about producer | grep -q p
+x | has_match p'
+  while IFS= read -r line; do
+    [ -n "$(printf '1:%s\n' "$line" | _grep_q_after_a_pipe)" ] && _ok || _fail "the guard missed: $line"
+  done <<<"$bad"
+  while IFS= read -r line; do
+    [ -z "$(printf '1:%s\n' "$line" | _grep_q_after_a_pipe)" ] && _ok || _fail "the guard flagged a safe line: $line"
+  done <<<"$safe"
+}
+
 # D1/D2: gate agents, tier->model map and findings schema stay in step with the cards and the ledger.
 test_models_conf_has_every_tier_once_and_a_model_for_each() {
   local t n

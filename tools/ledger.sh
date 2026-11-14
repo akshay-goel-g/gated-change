@@ -133,6 +133,15 @@
 #
 set -uo pipefail
 
+# `producer | has_match PATTERN` is true when any line matches. Under pipefail a `producer | grep -q PATTERN` is unsafe:
+# grep -q quits at its first hit, the producer gets SIGPIPE (141) once its output is bigger than a pipe buffer, and the whole
+# pipeline reads as "no match" (R-033). This counts instead, so it reads all its input. Takes grep's arguments (-F, -x, -E).
+has_match() {
+  local _n
+  _n="$(grep -c "$@")"
+  [ "${_n:-0}" -gt 0 ]
+}
+
 # Where this script itself lives, one level above tools/ — used both here (to
 # pick the right default ledger) and by detect_kit() below.
 KIT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
@@ -756,7 +765,7 @@ cmd_add() {
   # Well-formed is not the same as real. G9+ is a legal authored gate (core/06-extending.md),
   # so a gate the router does not list is warned about, not refused: `G9` typed for `G8`
   # would otherwise be logged, mandated by nothing, and look like evidence.
-  if _matrix_load 2>/dev/null && ! matrix_gates 2>/dev/null | grep -qx "$gate"; then
+  if _matrix_load 2>/dev/null && ! matrix_gates 2>/dev/null | has_match -x "$gate"; then
     echo "WARNING: $gate is not a gate in the router table (core/01-router.md). It is recorded," >&2
     echo "  but no tier mandates it, so compliance will never ask for it. Typo for G1..G8?" >&2
   fi
@@ -1641,14 +1650,14 @@ change_lineage_start() {
 
 # Whether the change has any route at all.
 change_has_route() {
-  grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -qF "\"change\":\"$(json_escape "$1")\""
+  grep '"type":"route"' "$LEDGER" 2>/dev/null | has_match -F "\"change\":\"$(json_escape "$1")\""
 }
 
 # Whether the change already has a route recorded for ANY declared action (so a firing now is a
 # repeat, and a new event).
 change_has_any_action_route() {
   grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -F "\"change\":\"$(json_escape "$1")\"" \
-    | grep -q '"action":"'
+    | has_match '"action":"'
 }
 
 # The highest round of any route recorded for the change IN ITS CURRENT LINEAGE (empty when it has
@@ -1663,7 +1672,7 @@ change_latest_route_round() {
 # Whether the change has a round-1 route carrying a base (a lineage to restart).
 change_has_round1() {
   grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -F "\"change\":\"$(json_escape "$1")\"" \
-    | grep '"round":1,' | grep -q '"base":"[0-9a-f]'
+    | grep '"round":1,' | has_match '"base":"[0-9a-f]'
 }
 
 # Round-1 base rows of the current lineage whose base differs from the lineage's and which carry no
@@ -1708,7 +1717,7 @@ gate_entries() {
     | grep -F "\"gate\":\"$2\""
 }
 
-gate_has_outcome() { gate_entries "$1" "$2" | grep -q "\"outcome\":\"$3\""; }
+gate_has_outcome() { gate_entries "$1" "$2" | has_match "\"outcome\":\"$3\""; }
 
 # The highest ROUND at which this (change, gate) has ANY entry, or "" if none.
 # Same convention gate_passed_round already uses for "latest" — a round number,
@@ -1789,7 +1798,7 @@ gate_outcome_note() {
 # a bare n/a the same as a reasoned one, silently, as long as the cell was
 # conditional.
 gate_outcome_has_reason() {
-  gate_entries "$1" "$2" | grep "\"outcome\":\"$3\"" | tail -1 | grep -q '"note":"[^"]'
+  gate_entries "$1" "$2" | grep "\"outcome\":\"$3\"" | tail -1 | has_match '"note":"[^"]'
 }
 
 # Whether ANY record of WHY this change exists is on the ledger at all: a
@@ -1818,8 +1827,8 @@ change_has_recorded_reason() {
   local _ls; _ls="$(change_lineage_start "$1")"
   grep -n '"type":"route"' "$LEDGER" 2>/dev/null | grep -F "\"change\":\"$(json_escape "$1")\"" \
     | awk -F: -v s="$_ls" '$1 + 0 >= s + 0' \
-    | grep -q '"reason":"[^"]' && return 0
-  gate_entries "$1" "G1" | grep '"round":1,' | grep -q '"note":"[^"]'
+    | has_match '"reason":"[^"]' && return 0
+  gate_entries "$1" "G1" | grep '"round":1,' | has_match '"note":"[^"]'
 }
 
 # Which kit builds produced this change's entries, other than the one running now.
@@ -2112,9 +2121,9 @@ cmd_compliance() {
   local _unmarked; _unmarked="$(change_unmarked_base_changes "$change")"
   [ "${_unmarked:-0}" -gt 0 ] && echo "  NOTE: '$change' has $_unmarked round-1 route(s) with a base other than the lineage's and no restart marker (merged branches, or a hand-edited ledger). They are NOT treated as a restart; passes outside the lineage base read UNBOUND." >&2
   if [ -z "$base_commit" ]; then
-    if grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -F "\"change\":\"$(json_escape "$change")\"" | grep -q '"base":"[0-9a-f]'; then
+    if grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -F "\"change\":\"$(json_escape "$change")\"" | has_match '"base":"[0-9a-f]'; then
       echo "  NOTE: the base commit recorded for '$change' does not resolve to one commit in this clone (missing, or an ambiguous abbreviation) -- gate records are not checked against its commits." >&2
-    elif grep '"type":"route"' "$LEDGER" 2>/dev/null | grep -qF "\"change\":\"$(json_escape "$change")\""; then
+    elif grep '"type":"route"' "$LEDGER" 2>/dev/null | has_match -F "\"change\":\"$(json_escape "$change")\""; then
       echo "  NOTE: no base commit is recorded for '$change' (its route entry predates --base) -- gate records are not checked against its commits." >&2
     else
       echo "  NOTE: no route is recorded for '$change', so there is no base commit -- gate records are not checked against its commits." >&2
@@ -2265,7 +2274,7 @@ cmd_compliance() {
       # never touched — printing the generic "your call" CHECK line for both
       # made a gate with a real, reasoned `n/a` on record look byte-identical to
       # one nobody ever looked at. Show what was logged instead, when anything was.
-      if gate_entries "$change" "$g" | grep -q .; then
+      if gate_entries "$change" "$g" | has_match .; then
         local o; o="$(gate_latest_outcome "$change" "$g")"
         if gate_fail_after_pass "$change" "$g"; then o="fail"
         elif [ -n "$(gate_passed_round "$change" "$g")" ]; then o="pass"; fi
