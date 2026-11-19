@@ -9258,6 +9258,43 @@ x | has_match p'
   done <<<"$safe"
 }
 
+# R-039: the plugin's compliance skill told the model to run `ledger.sh compliance --tier <T> --round <N>` with no change
+# named, which ledger.sh refuses with a usage error (exit 2), so the skill could never give a verdict. Round 1 of the fix
+# used `--latest`, which the kit tag the plugin installs (v<plugin.json version>) does not have: G4 reproduced
+# `unknown option: --latest` there. So this takes the command line out of the skill file, fills in a name, tier and
+# round, and runs it against BOTH the working-tree kit and the kit at the pinned tag (skipped when the tag is not
+# in this checkout, e.g. a shallow CI clone), so the skill can use only what the kit it installs has.
+test_the_compliance_skill_command_is_one_ledger_sh_accepts() {
+  local f="$KIT/plugin/skills/compliance/SKILL.md" cmd
+  cmd="$(grep -m1 'ledger.sh compliance' "$f" | tr -d '\r' | sed 's/^[[:space:]]*//')"
+  [ -n "$cmd" ] && _ok || { _fail "no 'ledger.sh compliance' command in $f"; return; }
+  # Not redundant with the pinned-tag run below: when that tag is absent (a shallow clone) the run is skipped and this is the only guard.
+  case "$cmd" in *--change*) _ok;; *) _fail "the skill's command names no change by --change (--latest is absent from the kit the plugin installs): $cmd"; return;; esac
+  newrepo
+  led route --change skillcheck --predicted T4 --actual T4 --action edit --evidence cite >/dev/null 2>&1
+  local args="${cmd#*ledger.sh }"; args="${args//<name>/skillcheck}"; args="${args//<T0-T4>/T4}"; args="${args//<N>/1}"
+  case "$args" in *'<'*) _fail "the skill's command still has a placeholder this test does not fill: $args"; return;; esac
+  # shellcheck disable=SC2086
+  LAST_OUT="$(led $args 2>&1)"; LAST_EXIT=$?
+  [ "$LAST_EXIT" -ne 2 ] && _ok "the skill's command ran without a usage error (exit $LAST_EXIT)" || _fail "ledger.sh refused the skill's command ($args): $LAST_OUT"
+  assert_contains 'skillcheck'
+  local pv tag old
+  pv="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$KIT/plugin/.claude-plugin/plugin.json" | head -1)"
+  tag="v$pv"
+  if git -C "$KIT" rev-parse -q --verify "$tag^{commit}" >/dev/null 2>&1; then
+    old="$(mktemp -d "$TMPROOT/pinned-kit.XXXXXX")"
+    git -C "$KIT" archive "$tag" tools core | tar -x -C "$old"
+    [ -f "$old/tools/ledger.sh" ] || { _fail "could not extract the kit at $tag (git archive | tar failed), so its ledger.sh was not tried"; return; }
+    # shellcheck disable=SC2086
+    LAST_OUT="$( cd "$REPO" && bash "$old/tools/ledger.sh" --ledger "$(ledger_path)" $args 2>&1 )"; LAST_EXIT=$?
+    [ "$LAST_EXIT" -ne 2 ] && _ok "the kit at the pinned tag $tag accepts the skill's command (exit $LAST_EXIT)" \
+      || _fail "the kit the plugin installs ($tag) refuses the skill's command ($args): $LAST_OUT"
+    assert_contains 'skillcheck'
+  else
+    _skip "tag $tag is not in this checkout, so the skill's command was not tried against the kit the plugin installs"
+  fi
+}
+
 # D1/D2: gate agents, tier->model map and findings schema stay in step with the cards and the ledger.
 test_models_conf_has_every_tier_once_and_a_model_for_each() {
   local t n
